@@ -1,6 +1,10 @@
 package commands
 
-import "github.com/bwmarrin/discordgo"
+import (
+	"log"
+
+	"github.com/bwmarrin/discordgo"
+)
 
 func init() {
 	register(Command{
@@ -9,12 +13,14 @@ func init() {
 			Description: "Replies with pong",
 		},
 		Handler: func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
 					Content: "pong",
 				},
-			})
+			}); err != nil {
+				log.Printf("ping: failed to respond to interaction: %v", err)
+			}
 		},
 	})
 }

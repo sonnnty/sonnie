@@ -9,3 +9,6 @@
 
 # Internal planning docs — not meant for the public repo
 docs/
+
+# Subagent-driven-development scratch workspace
+.superpowers/

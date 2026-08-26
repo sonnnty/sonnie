@@ -29,6 +29,9 @@ func (b *Bot) Open() error {
 }
 
 func handleInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if i.Type != discordgo.InteractionApplicationCommand {
+		return
+	}
 	c, ok := commands.Find(i.ApplicationCommandData().Name)
 	if !ok {
 		return

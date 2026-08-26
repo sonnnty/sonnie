@@ -1,0 +1,11 @@
+# Secrets
+.env
+
+# Go build artifacts
+/bin/
+*.exe
+*.test
+*.out
+
+# Internal planning docs — not meant for the public repo
+docs/

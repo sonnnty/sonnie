@@ -20,7 +20,7 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 
-	b, err := bot.New(cfg.DiscordToken)
+	b, err := bot.New(cfg)
 	if err != nil {
 		log.Fatalf("bot: %v", err)
 	}

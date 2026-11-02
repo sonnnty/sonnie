@@ -47,7 +47,7 @@ const (
 // sends voice state updates (op 4) through the session and feeds the
 // session's voice events to disgo. See docs/voice-transport.md.
 //
-// Create it with NewDAVEJoiner before the session is opened.
+// Create it with NewDAVEJoiner.
 type DAVEJoiner struct {
 	session *discordgo.Session
 

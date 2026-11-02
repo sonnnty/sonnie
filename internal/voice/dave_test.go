@@ -32,7 +32,7 @@ func newFakeVoiceConn(ready bool) *fakeVoiceConn {
 	return c
 }
 
-func (c *fakeVoiceConn) UDP() dvoice.UDPConn   { return c.udp }
+func (c *fakeVoiceConn) UDP() dvoice.UDPConn  { return c.udp }
 func (c *fakeVoiceConn) DAVE() godave.Session { return c.dave }
 
 func (c *fakeVoiceConn) SetSpeaking(_ context.Context, flags dvoice.SpeakingFlags) error {

@@ -13,9 +13,10 @@ func newReadAloud(s *discordgo.Session, cfg config.TTSConfig) *readaloud.Manager
 	return readaloud.New(readaloud.Config{
 		// TODO: replace both stubs; until then /tts join connects but
 		// every message fails with "no synthesizer configured".
-		Synth:    tts.Unimplemented{},
-		Encoder:  voice.UnimplementedEncoder{},
-		Joiner:   voice.DiscordJoiner{Session: s},
+		Synth:   tts.Unimplemented{},
+		Encoder: voice.UnimplementedEncoder{},
+		// Registers its own voice event handlers on s.
+		Joiner:   voice.NewDAVEJoiner(s),
 		Presence: statePresence{s: s},
 
 		Lang:        cfg.Lang,

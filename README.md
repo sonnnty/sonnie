@@ -14,6 +14,21 @@ A general-purpose Discord bot written in Go, grown one command at a time.
 
 3. In a server the bot has been invited to, run `/ping` — it should reply `pong`.
 
+## Run with Docker
+
+The image is a static Go binary on a non-root distroless base. It reads its
+configuration from environment variables only and listens on no port.
+
+```bash
+docker build -t sonnie .
+docker run --rm --env-file .env sonnie
+```
+
+`.env` is excluded from the build context (see `.dockerignore`), so the token
+is never baked into the image — pass it at run time with `--env-file` or `-e`.
+Without `DISCORD_BOT_TOKEN` the container exits immediately with a config
+error.
+
 ## Adding a command
 
 Add a new file under `internal/commands/`, following the pattern in

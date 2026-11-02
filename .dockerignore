@@ -1,0 +1,29 @@
+# Secrets: .env holds a real token and must never reach the build context.
+.env
+.env.*
+**/.env
+**/.env.*
+*.pem
+*.key
+
+# VCS and tooling
+.git
+.gitignore
+.superpowers/
+.claude/
+.ha-plan
+.venv/
+
+# Internal docs
+docs/
+
+# Build artifacts
+bin/
+*.exe
+*.test
+*.out
+
+# Not needed to build
+Dockerfile
+.dockerignore
+README.md

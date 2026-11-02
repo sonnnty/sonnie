@@ -47,20 +47,26 @@ What works now:
   messages matter most.
 - The bot leaves automatically when nobody (other than bots) is left in the
   voice channel.
+- Voice transport: the bot joins through disgo's voice client, which uses
+  voice gateway v8 and `aead_aes256_gcm_rtpsize`/`aead_xchacha20_poly1305_rtpsize`
+  transport encryption. DAVE end-to-end encryption, which Discord requires
+  in voice channels since March 2026, comes from dave-go. Both are pure Go,
+  so no cgo. discordgo still handles everything else. Frames are paced at
+  20 ms and held until the DAVE handshake is done. This has not been tested
+  against a live voice channel yet. See
+  [docs/voice-transport.md](docs/voice-transport.md) for the research, the
+  options considered and why disgo and dave-go are pinned to untagged
+  commits.
 
 What is stubbed, so **no audio plays yet**:
 
 - Speech synthesis: `tts.Unimplemented` fails every request, so each
   message logs `tts: no synthesizer configured`.
 - Opus encoding: `voice.UnimplementedEncoder`.
-- Voice transport: discordgo v0.29.0 (the newest release) only supports the
-  `xsalsa20_poly1305` voice encryption mode, which Discord has retired. It
-  also has no support for DAVE end-to-end encryption, which Discord requires
-  for voice channels since March 2026. Even with the two stubs replaced,
-  audio is not expected to reach listeners until the voice connection is
-  replaced or updated. The connection sits behind the `voice.Conn` and
-  `readaloud.Joiner` interfaces so it can be swapped without touching the
-  rest.
+
+Once both are replaced, audio is expected to reach listeners. The first
+live test should confirm that `/tts join` is not closed with code 4016 or
+4017, and that speech is heard in a normal desktop client.
 
 ### Setup
 

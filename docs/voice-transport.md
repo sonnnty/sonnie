@@ -136,8 +136,8 @@ Fallbacks, in order:
 - `daveConn` implements `voice.Conn`.
   - `SendOpus` paces frames at 20 ms and waits, up to a timeout, until the
     DAVE session is ready.
-  - `Speaking` sets or clears the microphone flag. Clearing it sends five
-    silence frames first, as Discord asks.
+  - `Speaking` sets or clears the microphone flag. When audio was sent,
+    clearing it first sends five silence frames, as Discord asks.
   - `Disconnect` closes the voice connection, which also sends op 4 to
     leave.
   - It does not use disgo's background `AudioSender`, because that goroutine

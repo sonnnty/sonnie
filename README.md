@@ -46,7 +46,8 @@ What works now:
   **oldest waiting message is dropped**, because in a live chat the newest
   messages matter most.
 - The bot leaves automatically when nobody (other than bots) is left in the
-  voice channel.
+  voice channel, and drops the binding if it is disconnected from voice or
+  moved to another channel.
 - Voice transport: the bot joins through disgo's voice client, which uses
   voice gateway v8 and `aead_aes256_gcm_rtpsize`/`aead_xchacha20_poly1305_rtpsize`
   transport encryption. DAVE end-to-end encryption, which Discord requires

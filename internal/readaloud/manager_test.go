@@ -238,6 +238,88 @@ func TestManager_AutoLeavesEmptyVoiceChannel(t *testing.T) {
 	}
 }
 
+func TestManager_DropsBindingWhenBotDisconnected(t *testing.T) {
+	j := &fakeJoiner{}
+	presence := &fakePresence{humans: map[string]int{"v1": 1}}
+	m := newTestManager(j, presence)
+	defer m.Close()
+	if err := m.Join(context.Background(), "g1", "v1", "t1"); err != nil {
+		t.Fatalf("join: %v", err)
+	}
+
+	presence.setBotChannel("")
+	m.HandleVoiceStateUpdate("g1")
+
+	if _, _, ok := m.Bound("g1"); ok {
+		t.Fatal("expected binding to be dropped when bot is disconnected")
+	}
+	if j.conn(0).Disconnected() {
+		t.Fatal("expected not to disconnect again when already gone from voice")
+	}
+	if m.HandleMessage(Message{GuildID: "g1", ChannelID: "t1", Content: "hi"}, nil) {
+		t.Fatal("expected no speech after binding is dropped")
+	}
+}
+
+func TestManager_DropsBindingWhenBotMovedBySomeoneElse(t *testing.T) {
+	j := &fakeJoiner{}
+	presence := &fakePresence{humans: map[string]int{"v1": 1, "v2": 1}}
+	m := newTestManager(j, presence)
+	defer m.Close()
+	if err := m.Join(context.Background(), "g1", "v1", "t1"); err != nil {
+		t.Fatalf("join: %v", err)
+	}
+
+	presence.setBotChannel("v2")
+	m.HandleVoiceStateUpdate("g1")
+
+	if _, _, ok := m.Bound("g1"); ok {
+		t.Fatal("expected binding to be dropped when bot is moved to another channel")
+	}
+	if !j.conn(0).Disconnected() {
+		t.Fatal("expected bot to disconnect from the channel it was moved to")
+	}
+	if m.HandleMessage(Message{GuildID: "g1", ChannelID: "t1", Content: "hi"}, nil) {
+		t.Fatal("expected no speech after binding is dropped")
+	}
+}
+
+func TestManager_KeepsBindingWhenMoveCausedByJoin(t *testing.T) {
+	j := &fakeJoiner{}
+	presence := &fakePresence{humans: map[string]int{"v1": 1, "v2": 1}}
+	m := newTestManager(j, presence)
+	defer m.Close()
+	if err := m.Join(context.Background(), "g1", "v1", "t1"); err != nil {
+		t.Fatalf("first join: %v", err)
+	}
+
+	// Simulate Discord firing VoiceStateUpdate both while /tts join is in
+	// flight and after it completes.
+	j.onJoin = func(guildID, _ string) {
+		m.HandleVoiceStateUpdate(guildID)
+	}
+	if err := m.Join(context.Background(), "g1", "v2", "t2"); err != nil {
+		t.Fatalf("second join: %v", err)
+	}
+	m.HandleVoiceStateUpdate("g1")
+
+	if text, vc, ok := m.Bound("g1"); !ok || text != "t2" || vc != "v2" {
+		t.Fatalf("expected binding (t2, v2, true), got (%q, %q, %v)", text, vc, ok)
+	}
+	if !j.conn(0).Disconnected() {
+		t.Fatal("expected old connection to be disconnected")
+	}
+	if j.conn(1).Disconnected() {
+		t.Fatal("expected new connection to stay connected")
+	}
+	if !m.HandleMessage(Message{GuildID: "g1", ChannelID: "t2", AuthorName: "Somchai", Content: "สวัสดี"}, nil) {
+		t.Fatal("expected message in new bound channel to be queued")
+	}
+	if got, want := recv(t, j.conn(1)), "Somchai: สวัสดี"; got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
+
 func TestManager_CloseLeavesAll(t *testing.T) {
 	j := &fakeJoiner{}
 	m := newTestManager(j, nil)

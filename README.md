@@ -46,7 +46,8 @@ What works now:
   **oldest waiting message is dropped**, because in a live chat the newest
   messages matter most.
 - The bot leaves automatically when nobody (other than bots) is left in the
-  voice channel.
+  voice channel, and drops the binding if it is disconnected from voice or
+  moved to another channel.
 
 What is stubbed, so **no audio plays yet**:
 

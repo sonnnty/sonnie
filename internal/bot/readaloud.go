@@ -85,9 +85,28 @@ func (n messageNames) Channel(id string) string {
 	return ""
 }
 
-// statePresence counts humans in a voice channel from the state cache.
+// statePresence reports voice channel occupancy from the state cache.
 type statePresence struct {
 	s *discordgo.Session
+}
+
+func (p statePresence) BotVoiceChannel(guildID string) string {
+	guild, err := p.s.State.Guild(guildID)
+	if err != nil {
+		return ""
+	}
+
+	p.s.State.RLock()
+	defer p.s.State.RUnlock()
+	if p.s.State.User == nil {
+		return ""
+	}
+	for _, vs := range guild.VoiceStates {
+		if vs.UserID == p.s.State.User.ID {
+			return vs.ChannelID
+		}
+	}
+	return ""
 }
 
 func (p statePresence) HumansInVoice(guildID, channelID string) int {

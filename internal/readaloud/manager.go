@@ -22,9 +22,13 @@ type Joiner interface {
 	Join(ctx context.Context, guildID, channelID string) (voice.Conn, error)
 }
 
-// Presence counts the humans (non-bots) currently in a voice channel.
+// Presence reports voice channel occupancy in a guild.
 type Presence interface {
+	// HumansInVoice counts the humans (non-bots) in channelID.
 	HumansInVoice(guildID, channelID string) int
+	// BotVoiceChannel returns the voice channel the bot is currently in, or
+	// "" if it is not in a voice channel in guildID.
+	BotVoiceChannel(guildID string) string
 }
 
 // Config holds the Manager's dependencies and settings.
@@ -175,22 +179,52 @@ func (m *Manager) HandleMessage(msg Message, names Names) bool {
 	return true
 }
 
-// HandleVoiceStateUpdate leaves guildID if the bound voice channel no longer
-// has any humans in it. Call it on every voice state change in the guild.
-//
-// TODO: also drop the binding when SONNIE itself is disconnected or moved
-// by a moderator; today the binding stays until /tts leave.
+// HandleVoiceStateUpdate drops the binding in guildID if the bot itself was
+// disconnected or moved out of the bound voice channel, or if no humans remain
+// in that channel. Call it on every voice state change in the guild.
 func (m *Manager) HandleVoiceStateUpdate(guildID string) {
-	_, voiceChannelID, ok := m.Bound(guildID)
-	if !ok || m.cfg.Presence == nil {
+	m.mu.Lock()
+	b := m.bindings[guildID]
+	m.mu.Unlock()
+	if b == nil || m.cfg.Presence == nil {
 		return
 	}
-	if m.cfg.Presence.HumansInVoice(guildID, voiceChannelID) > 0 {
-		return
+
+	switch botChannel := m.cfg.Presence.BotVoiceChannel(guildID); {
+	case botChannel == "":
+		// Already disconnected from voice: drop the binding and stop the
+		// player without calling Disconnect again.
+		_ = m.leaveBinding(guildID, b, false)
+	case botChannel != b.voiceChannelID:
+		// Moved to another channel by a moderator: drop the binding rather
+		// than silently rebinding, and leave that channel.
+		if err := m.leaveBinding(guildID, b, true); err != nil && !errors.Is(err, ErrNotBound) {
+			log.Printf("tts: guild %s: auto-leave: %v", guildID, err)
+		}
+	case m.cfg.Presence.HumansInVoice(guildID, b.voiceChannelID) == 0:
+		if err := m.leaveBinding(guildID, b, true); err != nil && !errors.Is(err, ErrNotBound) {
+			log.Printf("tts: guild %s: auto-leave: %v", guildID, err)
+		}
 	}
-	if err := m.Leave(guildID); err != nil && !errors.Is(err, ErrNotBound) {
-		log.Printf("tts: guild %s: auto-leave: %v", guildID, err)
+}
+
+func (m *Manager) leaveBinding(guildID string, b *binding, disconnect bool) error {
+	m.joinMu.Lock()
+	defer m.joinMu.Unlock()
+
+	m.mu.Lock()
+	if m.bindings[guildID] != b {
+		m.mu.Unlock()
+		return ErrNotBound
 	}
+	delete(m.bindings, guildID)
+	m.mu.Unlock()
+
+	b.player.Close()
+	if !disconnect {
+		return nil
+	}
+	return b.conn.Disconnect()
 }
 
 // Close leaves every guild. Use it on shutdown.

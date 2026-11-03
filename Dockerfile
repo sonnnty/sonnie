@@ -16,14 +16,11 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/sonnie ./cmd/bot
 
 # --- runtime stage ---------------------------------------------------------
-# distroless/static ships CA certificates (for the Discord gateway over TLS)
-# and runs as non-root (uid 65532). The bot only makes outbound connections:
-# it listens on no port, so there is no EXPOSE and no health endpoint.
-#
-# NOTE: a future TTS step may need ffmpeg to convert engine output to 48 kHz
-# Opus (see README "Host requirements"). distroless has no package manager, so
-# that would mean switching this stage to a base with ffmpeg (or copying in a
-# static ffmpeg build).
+# distroless/static ships CA certificates (for Discord and Google Cloud TTS
+# over TLS) and runs as non-root (uid 65532). Google Cloud TTS returns 48 kHz
+# Ogg/Opus directly and the bot demuxes it in pure Go, so neither cgo nor
+# ffmpeg is needed at runtime. The bot only makes outbound connections: it
+# listens on no port, so there is no EXPOSE and no health endpoint.
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/sonnie /sonnie
 

@@ -125,6 +125,9 @@ type session struct {
 	manage bool
 	// live tracks the per-message deletions that run while the session does.
 	live *liveDeletes
+	// perMessage records whether messages are deleted after being read, for
+	// the session message's footer.
+	perMessage bool
 
 	participants []string             // in the session now, in join order
 	left         []string             // joined, then left
@@ -339,6 +342,7 @@ func (m *Manager) start(ctx context.Context, req JoinRequest) (JoinResult, error
 		joinedAt:       make(map[string]time.Time),
 		pending:        make(map[string]Timer),
 		live:           new(liveDeletes),
+		perMessage:     m.cfg.DeleteAfter > 0,
 	}
 	// The first render needs a start time before Discord has reported one.
 	s.started = m.cfg.Now()

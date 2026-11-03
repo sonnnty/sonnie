@@ -346,7 +346,7 @@ func TestManager_LaterJoinEditsTheSameMessage(t *testing.T) {
 		t.Fatalf("%d edits, want 1", e.msgr.editCount())
 	}
 	emb := e.msgr.embed(msgID)
-	if !strings.Contains(emb.Description, "<@u1> <@u2>") || !strings.Contains(emb.Description, "(2)") {
+	if !strings.Contains(emb.Description, "👥 <@u1> <@u2>") {
 		t.Fatalf("description %q", emb.Description)
 	}
 	if mk := e.liveMarker(msgID); len(mk.Participants) != 2 {
@@ -438,7 +438,7 @@ func TestManager_JoinOtherVoiceChannelReplacesEmptySession(t *testing.T) {
 		t.Fatalf("session is %q/%q, want t2/v2", text, vc)
 	}
 	// The old session was cleaned up and summarised; the new one has its own message.
-	if !strings.Contains(e.summaryOf(old), "ลบข้อความแล้ว 1 ข้อความ") || !e.msgr.isDeleted(mine) {
+	if !strings.Contains(e.summaryOf(old), "ลบ 1 ข้อความ") || !e.msgr.isDeleted(mine) {
 		t.Fatal("the old session was not cleaned up")
 	}
 	if e.botMessages("t2") != 1 {
@@ -561,7 +561,7 @@ func TestManager_LastLeaveEndsSessionWithCleanup(t *testing.T) {
 			t.Errorf("%s message must stay", name)
 		}
 	}
-	for _, want := range []string{"จบการอ่านออกเสียง", "<@u1>", "<@u2>", "25 นาที", "ลบข้อความแล้ว 3 ข้อความ"} {
+	for _, want := range []string{"จบการอ่าน", "<@u1> <@u2>", "25 นาที", "ลบ 3 ข้อความ"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("summary %q missing %q", got, want)
 		}
@@ -592,7 +592,7 @@ func TestManager_SessionEndTriggers(t *testing.T) {
 
 			tt.trigger(e)
 
-			if got := e.summaryOf(msgID); !strings.Contains(got, "ลบข้อความแล้ว 1 ข้อความ") {
+			if got := e.summaryOf(msgID); !strings.Contains(got, "ลบ 1 ข้อความ") {
 				t.Fatalf("summary %q", got)
 			}
 			e.assertEnded("g1")
@@ -702,7 +702,7 @@ func TestManager_MissingManageMessagesAtStart(t *testing.T) {
 	}
 	msgID := e.sessionMessage()
 	emb := e.msgr.embed(msgID)
-	if emb.Color != colorWarning || !strings.Contains(emb.Fields[len(emb.Fields)-1].Value, "Manage Messages") {
+	if emb.Color != colorWarning || !strings.Contains(emb.Footer.Text, "⚠️ ไม่มีสิทธิ์ลบข้อความ") {
 		t.Fatalf("session message does not warn: %+v", emb)
 	}
 	mine, _ := e.say("u1", "hello")
@@ -719,7 +719,7 @@ func TestManager_MissingManageMessagesAtStart(t *testing.T) {
 	if e.msgr.isDeleted(mine) || len(e.msgr.single)+len(e.msgr.bulk) != 0 {
 		t.Fatal("messages were deleted without the permission at the start")
 	}
-	if !strings.Contains(got, "ไม่ได้ลบข้อความ") || !strings.Contains(got, "Manage Messages") {
+	if !strings.Contains(got, "ไม่ได้ลบข้อความ (ไม่มีสิทธิ์)") {
 		t.Fatalf("summary %q", got)
 	}
 }
@@ -774,7 +774,7 @@ func TestManager_CleanupFallsBackToTrackedMessagesWhenScanFails(t *testing.T) {
 	}
 	got := e.summaryOf(msgID)
 
-	if !e.msgr.isDeleted(mine) || e.msgr.isDeleted(stranger) || !strings.Contains(got, "ลบข้อความแล้ว 1 ข้อความ") {
+	if !e.msgr.isDeleted(mine) || e.msgr.isDeleted(stranger) || !strings.Contains(got, "ลบ 1 ข้อความ") {
 		t.Fatalf("deleted mine=%v stranger=%v summary %q", e.msgr.isDeleted(mine), e.msgr.isDeleted(stranger), got)
 	}
 }
@@ -839,7 +839,7 @@ func TestManager_RecoverFinishesUnfinishedSession(t *testing.T) {
 	if !e.msgr.isDeleted(m1) || !e.msgr.isDeleted(m2) || e.msgr.isDeleted(stranger) || e.msgr.isDeleted(sessionMsg) {
 		t.Fatalf("wrong messages deleted; alive: %v", e.msgr.alive("t1"))
 	}
-	for _, want := range []string{"<@u1>", "<@u2>", "ลบข้อความแล้ว 2 ข้อความ", "13 นาที"} {
+	for _, want := range []string{"<@u1>", "<@u2>", "ลบ 2 ข้อความ", "13 นาที"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("summary %q missing %q", got, want)
 		}

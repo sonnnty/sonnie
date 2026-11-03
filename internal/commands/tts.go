@@ -55,7 +55,7 @@ func init() {
 				{
 					Type:        discordgo.ApplicationCommandOptionSubCommand,
 					Name:        "join",
-					Description: "Join the read-aloud session; your messages here are read aloud and deleted when it ends",
+					Description: "Join the read-aloud session; your messages here are read aloud, then deleted",
 				},
 				{
 					Type:        discordgo.ApplicationCommandOptionSubCommand,
@@ -125,8 +125,6 @@ func handleTTS(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	}
 }
 
-const ttsDeleteNotice = "ข้อความที่คุณพิมพ์ในห้องนี้ระหว่างการอ่านจะถูกลบเมื่อจบ"
-
 func ttsJoinReply(ctx context.Context, ctl TTSController, req readaloud.JoinRequest) string {
 	res, err := ctl.Join(ctx, req)
 	if err != nil {
@@ -150,21 +148,14 @@ func ttsJoinReply(ctx context.Context, ctl TTSController, req readaloud.JoinRequ
 		return "บอทเข้าห้องเสียงของคุณไม่ได้ — ตรวจสอบว่าบอทมีสิทธิ์ Connect และ Speak ในห้องนั้น หรือลองใหม่หากการเชื่อมต่อเสียงล้มเหลว"
 	}
 
-	var reply string
 	switch {
 	case res.AlreadyIn:
-		return "คุณอยู่ในการอ่านออกเสียงนี้อยู่แล้ว — ออกด้วย /tts leave"
-	case res.Started:
-		reply = fmt.Sprintf("✅ เริ่มอ่านออกเสียงแล้ว — ข้อความของคุณใน <#%s> จะถูกอ่านในห้อง <#%s>", req.TextChannelID, req.VoiceChannelID)
+		return "คุณอยู่ในการอ่านนี้แล้ว"
+	case !res.CanManage:
+		return fmt.Sprintf("✅ เข้าร่วมแล้ว — ข้อความของคุณใน <#%s> จะถูกอ่าน (บอทไม่มีสิทธิ์ลบข้อความ)", req.TextChannelID)
 	default:
-		reply = fmt.Sprintf("✅ เข้าร่วมแล้ว — ข้อความของคุณใน <#%s> จะถูกอ่านในห้อง <#%s> (ผู้เข้าร่วม %d คน)",
-			req.TextChannelID, req.VoiceChannelID, res.Participants)
+		return fmt.Sprintf("✅ เข้าร่วมแล้ว — ข้อความของคุณใน <#%s> จะถูกอ่านแล้วลบ", req.TextChannelID)
 	}
-	reply += " ออกด้วย /tts leave"
-	if res.CanManage {
-		return reply + "\n🧹 " + ttsDeleteNotice
-	}
-	return reply + "\n⚠️ บอทไม่มีสิทธิ์ Manage Messages ในห้องนี้ จึงจะไม่ลบข้อความเมื่อจบ"
 }
 
 func ttsLeaveReply(ctl TTSController, guildID, userID string) string {
@@ -173,14 +164,14 @@ func ttsLeaveReply(ctl TTSController, guildID, userID string) string {
 	case errors.Is(err, readaloud.ErrNotBound):
 		return "ตอนนี้ไม่ได้อ่านออกเสียงในเซิร์ฟเวอร์นี้"
 	case errors.Is(err, readaloud.ErrNotParticipant):
-		return "คุณไม่ได้อยู่ในการอ่านออกเสียงนี้ — เข้าร่วมด้วย /tts join"
+		return "คุณไม่ได้อยู่ในการอ่านนี้ — เข้าร่วมด้วย /tts join"
 	case err != nil:
 		log.Printf("tts: leave guild %s: %v", guildID, err)
 		return "จบการอ่านออกเสียงแล้ว แต่ออกจากห้องเสียงไม่สำเร็จ"
 	case res.Ended:
-		return "ออกแล้ว — จบการอ่านออกเสียงและบอทออกจากห้องเสียง บอทกำลังลบข้อความของผู้เข้าร่วมแล้วสรุปไว้ในข้อความเซสชัน"
+		return "ออกแล้ว — จบการอ่าน"
 	default:
-		return fmt.Sprintf("ออกจากการอ่านออกเสียงแล้ว (ยังเหลือผู้เข้าร่วม %d คน)", res.Participants)
+		return fmt.Sprintf("ออกแล้ว (เหลืออีก %d คน)", res.Participants)
 	}
 }
 

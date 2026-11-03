@@ -60,23 +60,22 @@ func TestFormatSessionMarker_StaysWithinFooterLimit(t *testing.T) {
 
 func TestSessionEmbed(t *testing.T) {
 	started := time.Unix(1793000000, 0)
-	v := sessionView{TextChannelID: "t1", VoiceChannelID: "v1", Started: started, Manage: true, Participants: []string{"1", "2"}}
+	v := sessionView{TextChannelID: "t1", VoiceChannelID: "v1", Started: started, Manage: true, PerMessage: true, Participants: []string{"1", "2"}}
 	e := sessionEmbed(v)
 
 	if e.Title != "🔊 กำลังอ่านออกเสียง" {
 		t.Errorf("title %q", e.Title)
 	}
-	if !strings.Contains(e.Description, "(2)") || !strings.Contains(e.Description, "<@1> <@2>") {
-		t.Errorf("description %q", e.Description)
+	wantDesc := "👥 <@1> <@2>\n🔈 <#v1> · <t:1793000000:R>"
+	if e.Description != wantDesc {
+		t.Errorf("description %q, want %q", e.Description, wantDesc)
 	}
-	var all strings.Builder
-	for _, f := range e.Fields {
-		all.WriteString(f.Name + "=" + f.Value + "\n")
+	if len(e.Fields) != 0 {
+		t.Errorf("the embed has no fields, got %+v", e.Fields)
 	}
-	for _, want := range []string{"<#t1>", "<#v1>", "/tts join", "/tts leave", "ถูกลบเมื่อจบ"} {
-		if !strings.Contains(all.String(), want) {
-			t.Errorf("fields missing %q:\n%s", want, all.String())
-		}
+	human, _, _ := strings.Cut(e.Footer.Text, "\n")
+	if want := "/tts join เพื่อให้อ่าน · /tts leave เพื่อออก · ลบข้อความหลังอ่าน"; human != want {
+		t.Errorf("footer %q, want %q", human, want)
 	}
 	if e.Color != colorActive {
 		t.Errorf("colour %#x", e.Color)
@@ -86,10 +85,27 @@ func TestSessionEmbed(t *testing.T) {
 		t.Errorf("marker %+v ok=%v", m, ok)
 	}
 
+	// Without per-message deletion the footer says when messages go.
+	v.PerMessage = false
+	if human, _, _ := strings.Cut(sessionEmbed(v).Footer.Text, "\n"); !strings.HasSuffix(human, "ลบข้อความเมื่อจบ") {
+		t.Errorf("footer %q", human)
+	}
+
 	v.Manage = false
 	e = sessionEmbed(v)
-	if e.Color != colorWarning || !strings.Contains(e.Fields[len(e.Fields)-1].Value, "Manage Messages") {
-		t.Errorf("missing-permission embed: colour %#x, %+v", e.Color, e.Fields)
+	human, _, _ = strings.Cut(e.Footer.Text, "\n")
+	if e.Color != colorWarning || !strings.HasSuffix(human, "⚠️ ไม่มีสิทธิ์ลบข้อความ") || !strings.HasPrefix(human, "/tts join") {
+		t.Errorf("missing-permission embed: colour %#x, footer %q", e.Color, human)
+	}
+	if _, ok := ParseSessionMarkerFromEmbed(e); !ok {
+		t.Error("the marker must survive the warning footer")
+	}
+}
+
+func TestSessionEmbed_NoParticipants(t *testing.T) {
+	e := sessionEmbed(sessionView{VoiceChannelID: "v1", Started: time.Unix(1793000000, 0), Manage: true})
+	if !strings.HasPrefix(e.Description, "👥 -\n") {
+		t.Errorf("description %q", e.Description)
 	}
 }
 

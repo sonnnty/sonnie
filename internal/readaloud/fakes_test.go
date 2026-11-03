@@ -207,3 +207,10 @@ func (f *fakeMessenger) editCount() int {
 	defer f.mu.Unlock()
 	return len(f.edits)
 }
+
+// embedFor sets the embed of an existing message.
+func (f *fakeMessenger) embedFor(id string, e *discordgo.MessageEmbed) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.find(id).embed = e
+}

@@ -16,7 +16,7 @@ type Bot struct {
 
 	// readAloud is nil when the TTS feature is disabled.
 	readAloud *readaloud.Manager
-	// meter counts Google TTS characters; nil when no Google key is set.
+	// meter counts Google TTS characters, or money for Gemini models; nil when no Google key is set.
 	meter *usage.Meter
 }
 

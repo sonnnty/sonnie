@@ -104,6 +104,12 @@ func TestTTSUsageReply(t *testing.T) {
 			[]string{"1,000,000 / 1,000,000", "(100%)", "paused"}},
 		{"no cap", fakeUsage{usage.Snapshot{Month: "2026-11", Used: 1234}},
 			[]string{"1,234 characters", "No monthly cap"}},
+		{"money active", fakeUsage{usage.Snapshot{Month: "2026-11", Unit: usage.UnitTHBMicro, Used: 240000000, Limit: 300000000, Percent: 80, AudioMs: 123400}},
+			[]string{"spend for 2026-11", "฿240.00 / ฿300.00 budget", "(80%)", "Reading is active", "123.4 s"}},
+		{"money paused", fakeUsage{usage.Snapshot{Month: "2026-11", Unit: usage.UnitTHBMicro, Used: 300100000, Limit: 300000000, Percent: 100, Paused: true, AudioMs: 5000}},
+			[]string{"฿300.10 / ฿300.00", "(100%)", "paused", "5.0 s"}},
+		{"money no budget", fakeUsage{usage.Snapshot{Month: "2026-11", Unit: usage.UnitTHBMicro, Used: 12340000}},
+			[]string{"฿12.34", "No monthly budget"}},
 		{"untracked", nil, []string{"not tracked"}},
 	}
 	for _, tt := range tests {

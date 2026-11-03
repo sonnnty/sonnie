@@ -17,16 +17,24 @@ import (
 )
 
 type fakeTTSController struct {
-	joinErr, leaveErr error
-	joined            []string
+	joinRes  readaloud.JoinResult
+	joinErr  error
+	leaveRes readaloud.LeaveResult
+	leaveErr error
+
+	joined []readaloud.JoinRequest
+	left   []string
 }
 
-func (f *fakeTTSController) Join(_ context.Context, guildID, voiceChannelID, textChannelID string) error {
-	f.joined = append(f.joined, guildID+"/"+voiceChannelID+"/"+textChannelID)
-	return f.joinErr
+func (f *fakeTTSController) Join(_ context.Context, req readaloud.JoinRequest) (readaloud.JoinResult, error) {
+	f.joined = append(f.joined, req)
+	return f.joinRes, f.joinErr
 }
 
-func (f *fakeTTSController) Leave(string) error { return f.leaveErr }
+func (f *fakeTTSController) Leave(guildID, userID string) (readaloud.LeaveResult, error) {
+	f.left = append(f.left, guildID+"/"+userID)
+	return f.leaveRes, f.leaveErr
+}
 
 func TestTTS_IsRegisteredWithSubcommands(t *testing.T) {
 	c, ok := Find("tts")
@@ -43,49 +51,91 @@ func TestTTS_IsRegisteredWithSubcommands(t *testing.T) {
 }
 
 func TestTTSJoinReply(t *testing.T) {
-	ctl := &fakeTTSController{}
-	got := ttsJoinReply(context.Background(), ctl, "g", "v", "t")
-	if want := "Reading <#t> aloud in <#v>. Use /tts leave to stop."; got != want {
-		t.Fatalf("expected %q, got %q", want, got)
+	req := readaloud.JoinRequest{GuildID: "g", UserID: "u", VoiceChannelID: "v", TextChannelID: "t"}
+	tests := []struct {
+		name string
+		ctl  *fakeTTSController
+		want []string
+		not  []string
+	}{
+		{"started", &fakeTTSController{joinRes: readaloud.JoinResult{Started: true, Participants: 1, CanManage: true}},
+			[]string{"เริ่มอ่านออกเสียงแล้ว", "<#t>", "<#v>", "/tts leave", "จะถูกลบเมื่อจบ"}, []string{"Manage Messages"}},
+		{"added", &fakeTTSController{joinRes: readaloud.JoinResult{Participants: 3, CanManage: true}},
+			[]string{"เข้าร่วมแล้ว", "ผู้เข้าร่วม 3 คน", "จะถูกลบเมื่อจบ"}, []string{"เริ่มอ่าน"}},
+		{"already in", &fakeTTSController{joinRes: readaloud.JoinResult{AlreadyIn: true, Participants: 2, CanManage: true}},
+			[]string{"อยู่ในการอ่านออกเสียงนี้อยู่แล้ว"}, []string{"จะถูกลบ"}},
+		{"no manage messages", &fakeTTSController{joinRes: readaloud.JoinResult{Started: true, Participants: 1}},
+			[]string{"Manage Messages", "จะไม่ลบข้อความ"}, []string{"จะถูกลบเมื่อจบ"}},
+		{"busy elsewhere", &fakeTTSController{joinErr: &readaloud.BusyError{VoiceChannelID: "v9", TextChannelID: "t9"}},
+			[]string{"<#v9>", "<#t9>", "ยังมีคนอยู่"}, nil},
+		{"other text channel", &fakeTTSController{joinErr: &readaloud.TextChannelError{TextChannelID: "t9"}},
+			[]string{"ห้องข้อความ <#t9>", "/tts join ในห้อง <#t9>"}, nil},
+		{"session message failed", &fakeTTSController{joinErr: fmt.Errorf("%w: boom", readaloud.ErrSessionMessage)},
+			[]string{"Send Messages", "Embed Links"}, nil},
+		{"voice join failed", &fakeTTSController{joinErr: errors.New("boom")},
+			[]string{"Connect และ Speak"}, nil},
 	}
-	if len(ctl.joined) != 1 || ctl.joined[0] != "g/v/t" {
-		t.Fatalf("unexpected joins: %v", ctl.joined)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var logBuf bytes.Buffer
+			origLog := log.Writer()
+			log.SetOutput(&logBuf)
+			defer log.SetOutput(origLog)
+
+			got := ttsJoinReply(context.Background(), tt.ctl, req)
+
+			for _, w := range tt.want {
+				if !strings.Contains(got, w) {
+					t.Errorf("reply %q missing %q", got, w)
+				}
+			}
+			for _, w := range tt.not {
+				if strings.Contains(got, w) {
+					t.Errorf("reply %q must not contain %q", got, w)
+				}
+			}
+			if len(tt.ctl.joined) != 1 || tt.ctl.joined[0] != req {
+				t.Errorf("controller got %v, want %v", tt.ctl.joined, req)
+			}
+		})
 	}
 
-	ctl.joinErr = errors.New("boom")
-	if got := ttsJoinReply(context.Background(), ctl, "g", "v", "t"); !strings.Contains(got, "Connect and Speak") || !strings.Contains(got, "voice connection") {
-		t.Fatalf("expected permissions and voice connection hint, got %q", got)
-	}
+	t.Run("timeout logs the real error", func(t *testing.T) {
+		var logBuf bytes.Buffer
+		origLog := log.Writer()
+		log.SetOutput(&logBuf)
+		defer log.SetOutput(origLog)
 
-	var logBuf bytes.Buffer
-	origLog := log.Writer()
-	log.SetOutput(&logBuf)
-	defer log.SetOutput(origLog)
-
-	ctl.joinErr = fmt.Errorf("voice: join: %w", context.DeadlineExceeded)
-	gotTimeout := ttsJoinReply(context.Background(), ctl, "g", "v", "t")
-	if !strings.Contains(gotTimeout, "timed out") || !strings.Contains(gotTimeout, "Connect and Speak") {
-		t.Fatalf("expected timeout and permissions hint, got %q", gotTimeout)
-	}
-	if !strings.Contains(logBuf.String(), context.DeadlineExceeded.Error()) {
-		t.Fatalf("expected real error in log, got %q", logBuf.String())
-	}
+		ctl := &fakeTTSController{joinErr: fmt.Errorf("voice: join: %w", context.DeadlineExceeded)}
+		got := ttsJoinReply(context.Background(), ctl, req)
+		if !strings.Contains(got, "ไม่ทันเวลา") || !strings.Contains(got, "Connect และ Speak") {
+			t.Fatalf("expected timeout and permissions hint, got %q", got)
+		}
+		if !strings.Contains(logBuf.String(), context.DeadlineExceeded.Error()) {
+			t.Fatalf("expected real error in log, got %q", logBuf.String())
+		}
+	})
 }
 
 func TestTTSLeaveReply(t *testing.T) {
 	tests := []struct {
 		name string
-		err  error
+		ctl  *fakeTTSController
 		want string
 	}{
-		{"ok", nil, "Stopped reading and left the voice channel."},
-		{"not bound", readaloud.ErrNotBound, "I'm not reading any channel in this server."},
-		{"other error", errors.New("boom"), "Stopped reading, but leaving the voice channel failed."},
+		{"others remain", &fakeTTSController{leaveRes: readaloud.LeaveResult{Participants: 2}}, "ยังเหลือผู้เข้าร่วม 2 คน"},
+		{"last one", &fakeTTSController{leaveRes: readaloud.LeaveResult{Ended: true}}, "จบการอ่านออกเสียง"},
+		{"not bound", &fakeTTSController{leaveErr: readaloud.ErrNotBound}, "ไม่ได้อ่านออกเสียงในเซิร์ฟเวอร์นี้"},
+		{"not a participant", &fakeTTSController{leaveErr: readaloud.ErrNotParticipant}, "คุณไม่ได้อยู่ในการอ่านออกเสียงนี้"},
+		{"voice leave failed", &fakeTTSController{leaveRes: readaloud.LeaveResult{Ended: true}, leaveErr: errors.New("boom")}, "ออกจากห้องเสียงไม่สำเร็จ"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := ttsLeaveReply(&fakeTTSController{leaveErr: tt.err}, "g"); got != tt.want {
-				t.Fatalf("expected %q, got %q", tt.want, got)
+			if got := ttsLeaveReply(tt.ctl, "g", "u"); !strings.Contains(got, tt.want) {
+				t.Fatalf("reply %q missing %q", got, tt.want)
+			}
+			if len(tt.ctl.left) != 1 || tt.ctl.left[0] != "g/u" {
+				t.Fatalf("controller got %v", tt.ctl.left)
 			}
 		})
 	}

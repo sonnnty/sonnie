@@ -50,6 +50,19 @@ func TestTTS_IsRegisteredWithSubcommands(t *testing.T) {
 	}
 }
 
+func TestTTS_DescriptionsFitDiscordLimit(t *testing.T) {
+	c, _ := Find("tts")
+	check := func(name, desc string) {
+		if n := len([]rune(desc)); n == 0 || n > 100 {
+			t.Errorf("%s description is %d characters; Discord allows 1-100", name, n)
+		}
+	}
+	check("tts", c.Definition.Description)
+	for _, o := range c.Definition.Options {
+		check(o.Name, o.Description)
+	}
+}
+
 func TestTTSJoinReply(t *testing.T) {
 	req := readaloud.JoinRequest{GuildID: "g", UserID: "u", VoiceChannelID: "v", TextChannelID: "t"}
 	tests := []struct {

@@ -23,6 +23,9 @@ type fakeJoiner struct {
 	conns    []*voice.FakeConn
 	presence *fakePresence
 	onJoin   func(guildID, channelID string)
+	// blocking makes SendOpus wait until a test takes the frame, so a test
+	// decides when playback finishes.
+	blocking bool
 }
 
 func (j *fakeJoiner) Join(_ context.Context, guildID, channelID string) (voice.Conn, error) {
@@ -32,7 +35,11 @@ func (j *fakeJoiner) Join(_ context.Context, guildID, channelID string) (voice.C
 		return nil, j.err
 	}
 	j.joins = append(j.joins, guildID+"/"+channelID)
-	c := &voice.FakeConn{Sent: make(chan []byte, 16)}
+	buf := 16
+	if j.blocking {
+		buf = 0
+	}
+	c := &voice.FakeConn{Sent: make(chan []byte, buf)}
 	j.conns = append(j.conns, c)
 	p := j.presence
 	onJoin := j.onJoin

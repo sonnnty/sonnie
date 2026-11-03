@@ -69,5 +69,7 @@ func OggOpusDuration(data []byte) (time.Duration, error) {
 	if samples < 0 {
 		samples = 0
 	}
-	return time.Duration(samples) * time.Second / opusClockHertz, nil
+	// Split to keep the multiplication from overflowing on absurd granules.
+	whole, rest := samples/opusClockHertz, samples%opusClockHertz
+	return time.Duration(whole)*time.Second + time.Duration(rest)*time.Second/opusClockHertz, nil
 }

@@ -3,7 +3,8 @@
 // in with /tts join (only their messages are spoken), one public session
 // message that lists them, and the player that speaks. When the session ends
 // the participants' messages are deleted from the text channel and the session
-// message becomes a summary. Discord-specific parts are behind the Joiner,
+// message becomes a summary. With Config.DeleteAfter set, each message is also
+// deleted a few seconds after it has been read aloud. Discord-specific parts are behind the Joiner,
 // Presence and Messenger interfaces so the logic can be tested with fakes.
 package readaloud
 
@@ -94,9 +95,20 @@ type Config struct {
 	MaxChars    int
 	QueueSize   int
 	SpeakAuthor bool
+	// DeleteAfter is how long after a participant's message has been read
+	// aloud (or skipped) it is deleted. Zero turns this off and leaves only the
+	// end-of-session clean-up.
+	DeleteAfter time.Duration
 
 	// Now returns the current time; nil means time.Now. For tests.
 	Now func() time.Time
+	// AfterFunc runs f after d; nil means time.AfterFunc. For tests.
+	AfterFunc func(d time.Duration, f func()) Timer
+}
+
+// Timer is what Config.AfterFunc returns: a pending call that can be stopped.
+type Timer interface {
+	Stop() bool
 }
 
 // session is one guild's read-aloud session. The fields below mu are guarded
@@ -111,6 +123,8 @@ type session struct {
 	started        time.Time
 	// manage records whether the bot could delete messages at the start.
 	manage bool
+	// live tracks the per-message deletions that run while the session does.
+	live *liveDeletes
 
 	participants []string             // in the session now, in join order
 	left         []string             // joined, then left
@@ -118,6 +132,19 @@ type session struct {
 	// joinedAt is when each user first joined; only their messages from
 	// then on are deleted, so chat from before they opted in stays.
 	joinedAt map[string]time.Time
+	// pending holds the delayed deletions that have not fired yet, by message
+	// ID. Once ended is set (the session is over), none may be added.
+	pending map[string]Timer
+	ended   bool
+}
+
+// liveDeletes follows the deletions of one session that run in the
+// background: how many are in flight, and how many messages they removed
+// (guarded by Manager.mu). The end-of-session clean-up waits for them, so it
+// neither races a delete nor misses it in the summary.
+type liveDeletes struct {
+	wg      sync.WaitGroup
+	deleted int
 }
 
 func (s *session) isParticipant(userID string) bool {
@@ -176,6 +203,9 @@ type Manager struct {
 func New(cfg Config) *Manager {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
+	}
+	if cfg.AfterFunc == nil {
+		cfg.AfterFunc = func(d time.Duration, f func()) Timer { return time.AfterFunc(d, f) }
 	}
 	bg, stop := context.WithCancel(context.Background())
 	return &Manager{
@@ -307,6 +337,8 @@ func (m *Manager) start(ctx context.Context, req JoinRequest) (JoinResult, error
 		participants:   []string{req.UserID},
 		tracked:        make(map[string]time.Time),
 		joinedAt:       make(map[string]time.Time),
+		pending:        make(map[string]Timer),
+		live:           new(liveDeletes),
 	}
 	// The first render needs a start time before Discord has reported one.
 	s.started = m.cfg.Now()
@@ -419,6 +451,11 @@ func (m *Manager) Participants(guildID string) []string {
 // something was queued. Messages of everyone who has been in the session are
 // remembered for the clean-up, whether or not they are spoken; other people's
 // messages are not touched.
+//
+// A participant's message is also deleted DeleteAfter after the player has
+// finished it, or, when it is not going to be spoken (nothing left to say
+// after filtering, queue full, synthesis failed, monthly budget reached),
+// after the same delay from now, so the channel stays clean either way.
 func (m *Manager) HandleMessage(msg Message, names Names) bool {
 	m.mu.Lock()
 	s := m.sessions[msg.GuildID]
@@ -437,7 +474,11 @@ func (m *Manager) HandleMessage(msg Message, names Names) bool {
 	player := s.player
 	m.mu.Unlock()
 
-	if !speak || !ShouldSpeak(msg) {
+	if !speak {
+		return false
+	}
+	if !ShouldSpeak(msg) {
+		m.scheduleDelete(s, msg.MessageID)
 		return false
 	}
 	text := Normalize(msg.Content, TextOptions{
@@ -446,10 +487,65 @@ func (m *Manager) HandleMessage(msg Message, names Names) bool {
 		Names:    names,
 	})
 	if text == "" {
+		m.scheduleDelete(s, msg.MessageID)
 		return false
 	}
-	player.Enqueue(Utterance(msg.AuthorName, text, m.cfg.SpeakAuthor))
+	// Spoken, dropped from a full queue or failed: in every case the player is
+	// done with the message, which is when its delay starts. A message cut off
+	// by the end of the session is left to the end-of-session clean-up.
+	player.EnqueueWith(Utterance(msg.AuthorName, text, m.cfg.SpeakAuthor), func(bool) {
+		m.scheduleDelete(s, msg.MessageID)
+	})
 	return true
+}
+
+// scheduleDelete deletes message id after Config.DeleteAfter, in the
+// background. It does nothing when per-message deletion is off, the bot could
+// not delete messages when the session started, or the session is over (the
+// end-of-session clean-up takes what is left).
+func (m *Manager) scheduleDelete(s *session, id string) {
+	if m.cfg.DeleteAfter <= 0 || !s.manage || id == "" {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if s.ended || s.pending[id] != nil {
+		return
+	}
+	// Holding mu until the timer is stored means a fired callback, which
+	// takes mu first, always finds it.
+	s.pending[id] = m.cfg.AfterFunc(m.cfg.DeleteAfter, func() { m.deleteSpoken(s, id) })
+}
+
+// deleteSpoken is the timer callback of scheduleDelete: one single delete,
+// never blocking speech (timers run on their own goroutine). On success the
+// message leaves the tracked set and counts towards the summary. On failure
+// it is logged once and stays tracked, so the end-of-session clean-up retries.
+func (m *Manager) deleteSpoken(s *session, id string) {
+	m.mu.Lock()
+	if s.ended || s.pending[id] == nil {
+		m.mu.Unlock()
+		return
+	}
+	delete(s.pending, id)
+	s.live.wg.Add(1)
+	m.mu.Unlock()
+	defer s.live.wg.Done()
+
+	ctx, cancel := context.WithTimeout(m.bg, editTimeout)
+	defer cancel()
+	err := m.cfg.Messenger.DeleteMessage(ctx, s.textChannelID, id)
+	gone := errors.Is(err, ErrMessageGone)
+	if err != nil && !gone {
+		log.Printf("tts: guild %s: deleting message %s after it was read: %v; the end-of-session clean-up retries", s.guildID, id, err)
+		return
+	}
+	m.mu.Lock()
+	delete(s.tracked, id)
+	if !gone { // someone else deleting it first is not our deletion
+		s.live.deleted++
+	}
+	m.mu.Unlock()
 }
 
 // HandleVoiceStateUpdate ends the session in guildID if the bot itself was
@@ -502,6 +598,8 @@ type endedSession struct {
 	joinedAt  map[string]time.Time // missing users count from the session start
 	ended     time.Time
 	reason    string
+	// live is the session's per-message deletions; nil for a recovered one.
+	live *liveDeletes
 }
 
 // endLocked removes s from its guild, leaves voice and starts the clean-up in
@@ -518,6 +616,17 @@ func (m *Manager) endLocked(s *session, reason string, disconnect bool) error {
 // detach stops s's player, optionally disconnects, and starts the clean-up.
 // s must already be out of m.sessions.
 func (m *Manager) detach(s *session, reason string, disconnect bool) error {
+	// Cancel the delayed deletions first: from here on nothing is added or
+	// fires, and what is left is the clean-up's. A delete already in flight is
+	// waited for in finish.
+	m.mu.Lock()
+	s.ended = true
+	for id, t := range s.pending {
+		t.Stop()
+		delete(s.pending, id)
+	}
+	m.mu.Unlock()
+
 	s.player.Close()
 	var err error
 	if disconnect {
@@ -534,6 +643,7 @@ func (m *Manager) detach(s *session, reason string, disconnect bool) error {
 		joinedAt:  maps.Clone(s.joinedAt),
 		ended:     m.cfg.Now(),
 		reason:    reason,
+		live:      s.live,
 	}
 	m.mu.Unlock()
 
@@ -556,6 +666,16 @@ func (m *Manager) goFinish(e endedSession) {
 func (m *Manager) finish(ctx context.Context, e endedSession) {
 	msgr := m.cfg.Messenger
 	var res CleanupResult
+	// Deletions that fired just before the session ended may still be talking
+	// to Discord; let them finish so the scan below does not see them half
+	// done and the count includes them.
+	var live int
+	if e.live != nil {
+		e.live.wg.Wait()
+		m.mu.Lock()
+		live = e.live.deleted
+		m.mu.Unlock()
+	}
 	// The participants were told whether their messages would be deleted when
 	// the session started; keep that promise, and never delete without the
 	// permission now.
@@ -575,6 +695,8 @@ func (m *Manager) finish(ctx context.Context, e endedSession) {
 			Tracked:          e.tracked,
 		}, m.cfg.Now())
 	}
+
+	res.Deleted += live
 
 	// Cut short by shutdown: leave the message open so the next start
 	// finishes the job instead of recording a summary that hides the rest.

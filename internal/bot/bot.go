@@ -7,6 +7,7 @@ import (
 
 	"github.com/Sonty15/SONNIE/internal/commands"
 	"github.com/Sonty15/SONNIE/internal/config"
+	"github.com/Sonty15/SONNIE/internal/events"
 	"github.com/Sonty15/SONNIE/internal/readaloud"
 	"github.com/Sonty15/SONNIE/internal/usage"
 )
@@ -18,6 +19,11 @@ type Bot struct {
 	readAloud *readaloud.Manager
 	// meter counts Google TTS characters, or money for Gemini models; nil when no Google key is set.
 	meter *usage.Meter
+
+	// eventSched reminds and starts/ends scheduled events; stopEvents
+	// stops its loop.
+	eventSched *events.Scheduler
+	stopEvents context.CancelFunc
 }
 
 func New(cfg config.Config) (*Bot, error) {
@@ -26,6 +32,13 @@ func New(cfg config.Config) (*Bot, error) {
 		return nil, err
 	}
 	b := &Bot{Session: session}
+
+	// Scheduled events (/event). Not privileged, and already in discordgo's
+	// default intents; set explicitly because the feature depends on it.
+	session.Identify.Intents |= discordgo.IntentsGuildScheduledEvents
+	var eventHandler *events.Handler
+	eventHandler, b.eventSched = newEvents(session, cfg.Events)
+	commands.SetEvents(eventHandler)
 
 	if cfg.TTS.Enabled {
 		// Message Content is privileged: it must also be switched on in the
@@ -46,6 +59,10 @@ func New(cfg config.Config) (*Bot, error) {
 
 func (b *Bot) Open() error {
 	b.Session.AddHandler(handleInteraction)
+	b.Session.AddHandler(b.handleEventsGuildCreate)
+	b.Session.AddHandler(b.handleScheduledEventCreate)
+	b.Session.AddHandler(b.handleScheduledEventUpdate)
+	b.Session.AddHandler(b.handleScheduledEventDelete)
 	if b.readAloud != nil {
 		b.Session.AddHandler(b.handleMessageCreate)
 		b.Session.AddHandler(b.handleVoiceStateUpdate)
@@ -62,18 +79,29 @@ func (b *Bot) Open() error {
 		b.meter.Start(context.Background())
 	}
 
+	// Guilds (and their events) arrive after Open; the loop waits for them.
+	ctx, cancel := context.WithCancel(context.Background())
+	b.stopEvents = cancel
+	go b.eventSched.Run(ctx)
+
 	return b.registerCommands()
 }
 
 func handleInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	if i.Type != discordgo.InteractionApplicationCommand {
-		return
+	switch i.Type {
+	case discordgo.InteractionApplicationCommand:
+		if c, ok := commands.Find(i.ApplicationCommandData().Name); ok {
+			c.Handler(s, i)
+		}
+	case discordgo.InteractionApplicationCommandAutocomplete:
+		if c, ok := commands.Find(i.ApplicationCommandData().Name); ok && c.Autocomplete != nil {
+			c.Autocomplete(s, i)
+		}
+	case discordgo.InteractionMessageComponent:
+		if c, ok := commands.FindComponent(i.MessageComponentData().CustomID); ok {
+			c.Component(s, i)
+		}
 	}
-	c, ok := commands.Find(i.ApplicationCommandData().Name)
-	if !ok {
-		return
-	}
-	c.Handler(s, i)
 }
 
 func (b *Bot) registerCommands() error {
@@ -86,6 +114,9 @@ func (b *Bot) registerCommands() error {
 }
 
 func (b *Bot) Close() error {
+	if b.stopEvents != nil {
+		b.stopEvents()
+	}
 	if b.readAloud != nil {
 		b.readAloud.Close()
 	}

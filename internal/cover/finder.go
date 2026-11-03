@@ -54,7 +54,25 @@ func (f *Finder) Query(ctx context.Context, name, keywords string) string {
 	ctx, cancel := context.WithTimeout(ctx, KeywordTimeout)
 	defer cancel()
 	start := time.Now()
-	kw, err := f.Keywords.Keywords(ctx, name)
+	// The OAuth token fetch inside the call does not watch ctx, so the
+	// timeout is enforced here as well.
+	type result struct {
+		kw  string
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		kw, err := f.Keywords.Keywords(ctx, name)
+		done <- result{kw, err}
+	}()
+	var kw string
+	var err error
+	select {
+	case r := <-done:
+		kw, err = r.kw, r.err
+	case <-ctx.Done():
+		err = ctx.Err()
+	}
 	ms := time.Since(start).Milliseconds()
 	switch {
 	case errors.Is(err, ErrDisabled):

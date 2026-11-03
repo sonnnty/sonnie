@@ -193,7 +193,11 @@ func (h *Handler) applyCover(i *discordgo.InteractionCreate, who caller, ev *dis
 }
 
 func (h *Handler) editEvent(ev *discordgo.GuildScheduledEvent, p *discordgo.GuildScheduledEventParams, clearDescription bool) (*discordgo.GuildScheduledEvent, error) {
-	if !clearDescription {
+	// Discord needs entity_metadata: null when an external event becomes a
+	// voice event; discordgo omits the field, so that change goes raw too.
+	toVoice := ev.EntityType == discordgo.GuildScheduledEventEntityTypeExternal &&
+		p.EntityType == discordgo.GuildScheduledEventEntityTypeVoice
+	if !clearDescription && !toVoice {
 		return h.api.GuildScheduledEventEdit(ev.GuildID, ev.ID, p)
 	}
 	raw, err := json.Marshal(p)
@@ -204,7 +208,12 @@ func (h *Handler) editEvent(ev *discordgo.GuildScheduledEvent, p *discordgo.Guil
 	if err := json.Unmarshal(raw, &body); err != nil {
 		return nil, err
 	}
-	body["description"] = nil
+	if clearDescription {
+		body["description"] = nil
+	}
+	if toVoice {
+		body["entity_metadata"] = nil
+	}
 	endpoint := discordgo.EndpointGuildScheduledEvent(ev.GuildID, ev.ID)
 	resp, err := h.api.RequestWithBucketID("PATCH", endpoint, body, endpoint)
 	if err != nil {

@@ -628,3 +628,21 @@ func TestGuildOnly(t *testing.T) {
 		t.Fatalf("reply %q", got)
 	}
 }
+
+// Moving an external event into a voice channel must send entity_metadata:
+// null, which discordgo omits, so it goes through the raw PATCH.
+func TestEdit_ExternalToVoiceClearsEntityMetadata(t *testing.T) {
+	hs := newHarness()
+	seed(hs, "5002", "77")
+	hs.h.HandleCommand(command("u", permManage, "edit", strOpt("event", "5002"), strOpt("place", "888")))
+	if len(hs.api.rawPatches) != 1 {
+		t.Fatalf("raw patches: %d, want 1", len(hs.api.rawPatches))
+	}
+	body := hs.api.rawPatches[0]
+	if v, ok := body["entity_metadata"]; !ok || v != nil {
+		t.Fatalf("entity_metadata = %v (present %v), want explicit null", v, ok)
+	}
+	if _, ok := body["description"]; ok && body["description"] == nil {
+		t.Fatal("description was cleared on a place-only edit")
+	}
+}

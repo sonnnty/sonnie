@@ -153,6 +153,7 @@ func (s *Scheduler) Sync(guildID string, list []*discordgo.GuildScheduledEvent) 
 	for id, t := range s.events {
 		if t.ev.GuildID == guildID && !seen[id] {
 			delete(s.events, id)
+			delete(s.creators, id)
 		}
 	}
 	s.mu.Unlock()

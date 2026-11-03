@@ -380,7 +380,7 @@ func (h *Handler) edit(i *discordgo.InteractionCreate, who caller, opts options)
 	if !h.deferReply(i, true) {
 		return
 	}
-	updated, err := h.api.GuildScheduledEventEdit(i.GuildID, ev.ID, p)
+	updated, err := h.editEvent(ev, p, false)
 	if err != nil {
 		log.Printf("events: edit event %s: %v", ev.ID, err)
 		h.editReply(i, "แก้ไขไม่สำเร็จ: "+apiError(err), nil, nil)

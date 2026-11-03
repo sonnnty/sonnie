@@ -92,8 +92,18 @@ type googleErrorResponse struct {
 }
 
 // Synthesize calls Google Cloud Text-to-Speech and returns FormatOggOpus audio
-// at 48 kHz.
+// at 48 kHz. It logs a "tts: timing path=rest" line (see logTiming).
 func (g *Google) Synthesize(ctx context.Context, text, lang string) (Audio, error) {
+	start := time.Now()
+	audio, err := g.synthesize(ctx, text, lang)
+	if err == nil {
+		elapsed := time.Since(start)
+		logTiming("rest", elapsed, elapsed, len(audio.Data))
+	}
+	return audio, err
+}
+
+func (g *Google) synthesize(ctx context.Context, text, lang string) (Audio, error) {
 	if g.APIKey == "" && g.Client == nil {
 		return Audio{}, errors.New("tts: google: neither an API key nor an authenticated client is set")
 	}

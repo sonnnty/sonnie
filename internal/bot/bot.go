@@ -49,6 +49,7 @@ func (b *Bot) Open() error {
 	if b.readAloud != nil {
 		b.Session.AddHandler(b.handleMessageCreate)
 		b.Session.AddHandler(b.handleVoiceStateUpdate)
+		b.Session.AddHandler(b.handleGuildCreate)
 	}
 
 	if err := b.Session.Open(); err != nil {

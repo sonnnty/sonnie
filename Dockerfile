@@ -24,6 +24,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/sonnie /sonnie
 
-# Configuration comes only from environment variables (DISCORD_BOT_TOKEN, TTS_*;
+# Configuration comes only from environment variables (DISCORD_BOT_TOKEN, TTS_*,
+# EVENT_*, PEXELS_API_KEY, UNSPLASH_ACCESS_KEY;
 # see .env.example). No .env file is baked in; a missing one is ignored.
 ENTRYPOINT ["/sonnie"]

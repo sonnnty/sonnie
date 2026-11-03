@@ -1,7 +1,8 @@
 # Concept: Discord Scheduled Events
 
-Status: idea only, not started (2026-11-04). Separate from TTS: the bot does
-not join voice or read chat for events.
+Status: **implemented** (2026-11-03); see the README section "Server events
+(`/event`)" for how it works and [Deviations](#as-built-deviations) below.
+Separate from TTS: the bot does not join voice or read chat for events.
 
 ## Goal
 
@@ -58,3 +59,35 @@ names may need a translation/keyword step first (e.g. "เตะบอลวั�
   static, CGO-free image.
 - New secret if the chosen image API needs a key (goes in the k8s Secret,
   like the TTS credentials).
+
+## As built: deviations
+
+What differs from the concept above, and why:
+
+- **Image source:** Openverse is the default (no key, so it works tonight);
+  Pexels and Unsplash are implemented behind the same interface and are
+  tried first when `PEXELS_API_KEY` / `UNSPLASH_ACCESS_KEY` is set. Openverse
+  results are limited to CC0, PDM, CC BY and CC BY-SA; every found cover is
+  credited on the last line of the description. Google Custom Search is not
+  used.
+- **Thai names:** translated to English keywords with Gemini
+  (`gemini-2.5-flash-lite`, Vertex AI, region `global`, same service
+  account as Gemini-TTS), 3 s timeout, fallback to the raw name. Names
+  without Thai letters are searched as they are, without a Gemini call.
+- **`/event cover`:** 5 candidates (5 image embeds in one ephemeral
+  message), buttons 1–5 and 🔎 ค้นใหม่ for the next page; also offered from
+  a 🔄 เปลี่ยนรูป button on the `/event create` reply.
+- **Reminder:** one message in a channel (`EVENT_CHANNEL_ID`, else
+  `TTS_ALERT_CHANNEL_ID`) mentioning the interested users, not DMs.
+- **Auto start/end:** only voice and external events (stage events need a
+  stage instance); voice events are not ended by the bot because Discord
+  ends them when the channel empties. Canceling an event that is already
+  running ends it, because Discord does not allow ACTIVE → CANCELED.
+- **Permissions:** create needs Create Events or Manage Events;
+  edit/cover/cancel need Manage Events or being the creator. Who ran
+  `/event create` is remembered in memory only, so after a restart only
+  Manage Events can change the bot's own events.
+- **State:** nothing is persisted. Reminders whose time passed during a
+  restart are skipped (never sent twice); open cover pickers expire after
+  15 minutes or on restart.
+- **Not done:** recurring events.

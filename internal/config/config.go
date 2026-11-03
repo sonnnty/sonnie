@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 )
 
 type Config struct {
@@ -33,12 +34,21 @@ type TTSConfig struct {
 	QueueSize int
 	// SpeakAuthor prefixes each message with the author's display name.
 	SpeakAuthor bool
+	// MonthlyCharLimit is the most characters sent to Google TTS per
+	// US/Pacific calendar month (TTS_MONTHLY_CHAR_LIMIT). 0 means no cap.
+	MonthlyCharLimit int64
+	// AlertChannelID, if set (TTS_ALERT_CHANNEL_ID), is the Discord channel
+	// that receives usage alerts and holds the persisted usage counter.
+	AlertChannelID string
 }
 
 const (
 	defaultTTSLang      = "th"
 	defaultTTSMaxChars  = 200
 	defaultTTSQueueSize = 20
+
+	// defaultTTSMonthlyCharLimit is Google's free tier for Chirp 3: HD.
+	defaultTTSMonthlyCharLimit = 1000000
 )
 
 func Load(getenv func(string) string) (Config, error) {
@@ -61,6 +71,8 @@ func loadTTS(getenv func(string) string) (TTSConfig, error) {
 		MaxChars:    defaultTTSMaxChars,
 		QueueSize:   defaultTTSQueueSize,
 		SpeakAuthor: true,
+
+		MonthlyCharLimit: defaultTTSMonthlyCharLimit,
 	}
 
 	if v := getenv("TTS_LANG"); v != "" {
@@ -83,7 +95,35 @@ func loadTTS(getenv func(string) string) (TTSConfig, error) {
 		return TTSConfig{}, err
 	}
 
+	if cfg.MonthlyCharLimit, err = parseNonNegativeInt64(getenv, "TTS_MONTHLY_CHAR_LIMIT", cfg.MonthlyCharLimit); err != nil {
+		return TTSConfig{}, err
+	}
+	if cfg.AlertChannelID = strings.TrimSpace(getenv("TTS_ALERT_CHANNEL_ID")); cfg.AlertChannelID != "" && !isSnowflake(cfg.AlertChannelID) {
+		return TTSConfig{}, fmt.Errorf("TTS_ALERT_CHANNEL_ID: %q is not a Discord channel ID", cfg.AlertChannelID)
+	}
+
 	return cfg, nil
+}
+
+func isSnowflake(s string) bool {
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return s != ""
+}
+
+func parseNonNegativeInt64(getenv func(string) string, key string, def int64) (int64, error) {
+	v := getenv(key)
+	if v == "" {
+		return def, nil
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("%s: %q is not a non-negative integer", key, v)
+	}
+	return n, nil
 }
 
 func parseBool(getenv func(string) string, key string, def bool) (bool, error) {

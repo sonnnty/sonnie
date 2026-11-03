@@ -15,6 +15,17 @@ func (FakeEncoder) Encode(_ context.Context, audio tts.Audio) ([][]byte, error) 
 	return [][]byte{audio.Data}, nil
 }
 
+// FakeStreamEncoder is a StreamEncoder for tests: every chunk written to its
+// streams comes out as one frame, and whole audio as a single frame.
+type FakeStreamEncoder struct{ FakeEncoder }
+
+func (FakeStreamEncoder) NewStream(tts.Format) (FrameStream, error) { return fakeFrameStream{}, nil }
+
+type fakeFrameStream struct{}
+
+func (fakeFrameStream) Write(chunk []byte) ([][]byte, error) { return [][]byte{chunk}, nil }
+func (fakeFrameStream) Close() error                         { return nil }
+
 // FakeConn is an in-memory Conn for tests. It records frames and whether it
 // was disconnected. It is safe for concurrent use.
 type FakeConn struct {

@@ -2,7 +2,10 @@ package voice
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"sync/atomic"
 	"time"
 
 	"github.com/Sonty15/SONNIE/internal/tts"
@@ -11,6 +14,16 @@ import (
 // synthTimeout bounds a single synthesis + encode step so one slow engine
 // call cannot stall the queue forever.
 const synthTimeout = 30 * time.Second
+
+// streamIdleTimeout bounds each wait for audio on the streaming path (the
+// first chunk included). Unlike synthTimeout it does not cover playback, which
+// overlaps the stream there. A variable so tests can shorten it.
+var streamIdleTimeout = synthTimeout
+
+// streamBacklog is how many decoded chunks may wait for the sender. Opus
+// speech is a few KB per second and an utterance is capped at a few hundred
+// characters, so the receiver practically never waits on it.
+const streamBacklog = 256
 
 // PlayerConfig holds what a Player needs.
 type PlayerConfig struct {
@@ -90,6 +103,14 @@ func (p *Player) run(ctx context.Context) {
 }
 
 func (p *Player) speak(ctx context.Context, text string) error {
+	if enc, ok := p.cfg.Encoder.(StreamEncoder); ok {
+		return p.speakStream(ctx, enc, text)
+	}
+	return p.speakWhole(ctx, text)
+}
+
+// speakWhole synthesizes and encodes the whole utterance, then plays it.
+func (p *Player) speakWhole(ctx context.Context, text string) error {
 	prepCtx, cancel := context.WithTimeout(ctx, synthTimeout)
 	defer cancel()
 
@@ -116,4 +137,108 @@ func (p *Player) speak(ctx context.Context, text string) error {
 		}
 	}
 	return nil
+}
+
+// speakStream plays an utterance while it is still being synthesized: a
+// receiver goroutine reads audio chunks and decodes them into frames as they
+// arrive, and this goroutine sends them at the connection's 20 ms pace from
+// the first frame on. Returning (done, Close, send failure) cancels the
+// synthesis.
+func (p *Player) speakStream(ctx context.Context, enc StreamEncoder, text string) error {
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var timedOut atomic.Bool
+	idle := time.AfterFunc(streamIdleTimeout, func() {
+		timedOut.Store(true)
+		cancel()
+	})
+	defer idle.Stop()
+
+	stream, err := tts.OpenStream(streamCtx, p.cfg.Synth, text, p.cfg.Lang)
+	if err != nil {
+		return fmt.Errorf("synthesize: %w", idleErr(&timedOut, err))
+	}
+	defer stream.Close()
+	dec, err := enc.NewStream(stream.Format())
+	if err != nil {
+		return fmt.Errorf("encode: %w", err)
+	}
+
+	batches := make(chan [][]byte, streamBacklog)
+	recvDone := make(chan error, 1)
+	go func() {
+		defer close(batches)
+		recvDone <- receiveFrames(streamCtx, stream, dec, idle, batches)
+	}()
+
+	var sendErr error
+	speaking := false
+	for batch := range batches {
+		if sendErr != nil {
+			continue // drain until the receiver sees the cancellation
+		}
+		if !speaking {
+			if err := p.cfg.Conn.Speaking(true); err != nil {
+				sendErr = fmt.Errorf("speaking on: %w", err)
+				cancel()
+				continue
+			}
+			speaking = true
+			defer p.cfg.Conn.Speaking(false)
+		}
+		for _, frame := range batch {
+			if err := p.cfg.Conn.SendOpus(ctx, frame); err != nil {
+				sendErr = fmt.Errorf("send: %w", err)
+				cancel()
+				break
+			}
+		}
+	}
+	recvErr := <-recvDone
+	if sendErr != nil {
+		return sendErr
+	}
+	if recvErr != nil {
+		return idleErr(&timedOut, recvErr)
+	}
+	return nil
+}
+
+// receiveFrames reads stream to the end, feeding dec and passing on the
+// frames of each chunk. The idle timer only runs while waiting for audio.
+func receiveFrames(ctx context.Context, stream tts.AudioStream, dec FrameStream, idle *time.Timer, out chan<- [][]byte) error {
+	for {
+		idle.Reset(streamIdleTimeout)
+		chunk, err := stream.Recv()
+		idle.Stop()
+		if errors.Is(err, io.EOF) {
+			if err := dec.Close(); err != nil {
+				return fmt.Errorf("encode: %w", err)
+			}
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("synthesize: %w", err)
+		}
+		frames, decErr := dec.Write(chunk)
+		if len(frames) > 0 {
+			select {
+			case out <- frames:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		if decErr != nil {
+			return fmt.Errorf("encode: %w", decErr)
+		}
+	}
+}
+
+// idleErr names the idle timeout when it, rather than the caller, cancelled
+// the stream.
+func idleErr(timedOut *atomic.Bool, err error) error {
+	if timedOut.Load() {
+		return fmt.Errorf("no audio for %v: %w", streamIdleTimeout, err)
+	}
+	return err
 }

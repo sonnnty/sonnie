@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Sonty15/SONNIE/internal/readaloud"
+	"github.com/Sonty15/SONNIE/internal/usage"
 )
 
 type fakeTTSController struct {
@@ -33,8 +34,8 @@ func TestTTS_IsRegisteredWithSubcommands(t *testing.T) {
 	for _, o := range c.Definition.Options {
 		names = append(names, o.Name)
 	}
-	if got := strings.Join(names, ","); got != "join,leave" {
-		t.Fatalf("expected subcommands join,leave, got %s", got)
+	if got := strings.Join(names, ","); got != "join,leave,usage" {
+		t.Fatalf("expected subcommands join,leave,usage, got %s", got)
 	}
 }
 
@@ -82,6 +83,36 @@ func TestTTSLeaveReply(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := ttsLeaveReply(&fakeTTSController{leaveErr: tt.err}, "g"); got != tt.want {
 				t.Fatalf("expected %q, got %q", tt.want, got)
+			}
+		})
+	}
+}
+
+type fakeUsage struct{ snap usage.Snapshot }
+
+func (f fakeUsage) Snapshot() usage.Snapshot { return f.snap }
+
+func TestTTSUsageReply(t *testing.T) {
+	tests := []struct {
+		name string
+		u    UsageReporter
+		want []string
+	}{
+		{"active", fakeUsage{usage.Snapshot{Month: "2026-11", Used: 800000, Limit: 1000000, Percent: 80}},
+			[]string{"2026-11", "800,000 / 1,000,000", "(80%)", "Reading is active"}},
+		{"paused", fakeUsage{usage.Snapshot{Month: "2026-11", Used: 1000000, Limit: 1000000, Percent: 100, Paused: true}},
+			[]string{"1,000,000 / 1,000,000", "(100%)", "paused"}},
+		{"no cap", fakeUsage{usage.Snapshot{Month: "2026-11", Used: 1234}},
+			[]string{"1,234 characters", "No monthly cap"}},
+		{"untracked", nil, []string{"not tracked"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ttsUsageReply(tt.u)
+			for _, w := range tt.want {
+				if !strings.Contains(got, w) {
+					t.Errorf("reply %q missing %q", got, w)
+				}
 			}
 		})
 	}

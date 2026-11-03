@@ -5,17 +5,31 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strconv"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
 
 	"github.com/Sonty15/SONNIE/internal/readaloud"
+	"github.com/Sonty15/SONNIE/internal/usage"
 )
 
 // TTSController is what /tts needs from the read-aloud manager.
 type TTSController interface {
 	Join(ctx context.Context, guildID, voiceChannelID, textChannelID string) error
 	Leave(guildID string) error
+}
+
+// UsageReporter is what /tts usage needs from the TTS usage meter.
+type UsageReporter interface {
+	Snapshot() usage.Snapshot
+}
+
+var usageReporter UsageReporter
+
+// SetUsage gives /tts usage access to the usage meter. Same rules as SetTTS.
+func SetUsage(u UsageReporter) {
+	usageReporter = u
 }
 
 // ttsController is set by SetTTS during startup. It stays nil when the
@@ -47,6 +61,11 @@ func init() {
 					Type:        discordgo.ApplicationCommandOptionSubCommand,
 					Name:        "leave",
 					Description: "Stop reading and leave the voice channel",
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Name:        "usage",
+					Description: "Show this month's Google TTS character usage",
 				},
 			},
 		},
@@ -92,6 +111,8 @@ func handleTTS(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		}
 	case "leave":
 		ttsRespond(s, i, ttsLeaveReply(ctl, i.GuildID))
+	case "usage":
+		ttsRespondEphemeral(s, i, ttsUsageReply(usageReporter))
 	}
 }
 
@@ -116,6 +137,41 @@ func ttsLeaveReply(ctl TTSController, guildID string) string {
 		return "Stopped reading, but leaving the voice channel failed."
 	default:
 		return "Stopped reading and left the voice channel."
+	}
+}
+
+func ttsUsageReply(u UsageReporter) string {
+	if u == nil {
+		return "Usage is not tracked: no Google TTS API key is configured."
+	}
+	snap := u.Snapshot()
+	if snap.Limit <= 0 {
+		return fmt.Sprintf("Google TTS usage for %s (US/Pacific month): %s characters. No monthly cap is set.",
+			snap.Month, formatCount(snap.Used))
+	}
+	status := "Reading is active."
+	if snap.Paused {
+		status = "Reading is **paused** until next month."
+	}
+	return fmt.Sprintf("Google TTS usage for %s (US/Pacific month): %s / %s characters (%d%%). %s",
+		snap.Month, formatCount(snap.Used), formatCount(snap.Limit), snap.Percent, status)
+}
+
+// formatCount renders n with thousands separators, e.g. 1,000,000.
+func formatCount(n int64) string {
+	s := strconv.FormatInt(n, 10)
+	for i := len(s) - 3; i > 0; i -= 3 {
+		s = s[:i] + "," + s[i:]
+	}
+	return s
+}
+
+func ttsRespondEphemeral(s *discordgo.Session, i *discordgo.InteractionCreate, content string) {
+	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{Content: content, Flags: discordgo.MessageFlagsEphemeral},
+	}); err != nil {
+		log.Printf("tts: failed to respond to interaction: %v", err)
 	}
 }
 

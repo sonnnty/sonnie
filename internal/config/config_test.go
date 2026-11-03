@@ -37,7 +37,7 @@ func TestLoad_TTSDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := TTSConfig{Enabled: false, Lang: "th", MaxChars: 200, QueueSize: 20, SpeakAuthor: true}
+	want := TTSConfig{Enabled: false, Lang: "th", MaxChars: 200, QueueSize: 20, SpeakAuthor: true, MonthlyCharLimit: 1000000}
 	if cfg.TTS != want {
 		t.Fatalf("expected %+v, got %+v", want, cfg.TTS)
 	}
@@ -53,6 +53,9 @@ func TestLoad_TTSOverrides(t *testing.T) {
 		"TTS_MAX_CHARS":      "80",
 		"TTS_QUEUE_SIZE":     "5",
 		"TTS_SPEAK_AUTHOR":   "false",
+
+		"TTS_MONTHLY_CHAR_LIMIT": "500000",
+		"TTS_ALERT_CHANNEL_ID":   "123456789012345678",
 	}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -65,6 +68,9 @@ func TestLoad_TTSOverrides(t *testing.T) {
 		MaxChars:     80,
 		QueueSize:    5,
 		SpeakAuthor:  false,
+
+		MonthlyCharLimit: 500000,
+		AlertChannelID:   "123456789012345678",
 	}
 	if cfg.TTS != want {
 		t.Fatalf("expected %+v, got %+v", want, cfg.TTS)
@@ -80,6 +86,9 @@ func TestLoad_TTSInvalidValues(t *testing.T) {
 		{"TTS_MAX_CHARS", "abc"},
 		{"TTS_MAX_CHARS", "0"},
 		{"TTS_QUEUE_SIZE", "-3"},
+		{"TTS_MONTHLY_CHAR_LIMIT", "-1"},
+		{"TTS_MONTHLY_CHAR_LIMIT", "1m"},
+		{"TTS_ALERT_CHANNEL_ID", "#alerts"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.key+"="+tt.value, func(t *testing.T) {
@@ -88,5 +97,15 @@ func TestLoad_TTSInvalidValues(t *testing.T) {
 				t.Fatalf("expected error for %s=%q, got nil", tt.key, tt.value)
 			}
 		})
+	}
+}
+
+func TestLoad_TTSMonthlyLimitZeroMeansNoCap(t *testing.T) {
+	cfg, err := Load(envFrom(map[string]string{"DISCORD_BOT_TOKEN": "t", "TTS_MONTHLY_CHAR_LIMIT": "0"}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.TTS.MonthlyCharLimit != 0 {
+		t.Fatalf("expected 0 (no cap), got %d", cfg.TTS.MonthlyCharLimit)
 	}
 }

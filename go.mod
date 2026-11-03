@@ -10,6 +10,7 @@ require (
 	github.com/disgoorg/snowflake/v2 v2.0.3
 	github.com/joho/godotenv v1.5.1
 	github.com/thomas-vilte/dave-go v0.5.2-0.20261024193506-083b59341154
+	golang.org/x/image v0.47.0
 	golang.org/x/oauth2 v0.37.0
 	google.golang.org/api v0.304.0
 	google.golang.org/grpc v1.84.0

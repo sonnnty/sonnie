@@ -48,7 +48,7 @@ func TestParseStart(t *testing.T) {
 		{"สิบโมงเช้า", bkk(11, 4, 10, 0)},
 		{"สิบเอ็ดโมงครึ่ง", bkk(11, 4, 11, 30)},
 		{"ห้าโมงเย็น", bkk(11, 4, 17, 0)},
-		{"หกโมงเย็น", bkk(11, 4, 18, 0)}, // exactly now: not in the future
+		{"หกโมงเย็น", bkk(11, 4, 18, 0)},  // exactly now: not in the future
 		{"หกโมงครึ่ง", bkk(11, 4, 6, 30)}, // bare 6-12 โมง is the morning
 		{"สามโมง", bkk(11, 4, 15, 0)},
 		{"เก้าโมง", bkk(11, 4, 9, 0)},

@@ -6,6 +6,8 @@ import (
 	"math"
 	"strconv"
 	"strings"
+
+	"github.com/Sonty15/SONNIE/internal/tts"
 )
 
 type Config struct {
@@ -39,6 +41,11 @@ type TTSConfig struct {
 	// Prompt is an optional style prompt (TTS_PROMPT), sent only to Gemini
 	// models.
 	Prompt string
+	// Streaming (TTS_STREAMING) synthesizes Gemini models over the gRPC
+	// streaming API so speech starts before the whole sentence is ready.
+	// It defaults to true for a Gemini model; other voices always use the
+	// unary REST call.
+	Streaming bool
 	// MonthlyBudgetTHB is the money cap for Gemini models in baht per
 	// US/Pacific month (TTS_MONTHLY_BUDGET_THB). 0 means no cap.
 	MonthlyBudgetTHB float64
@@ -108,6 +115,9 @@ func loadTTS(getenv func(string) string) (TTSConfig, error) {
 
 	var err error
 	if cfg.Enabled, err = parseBool(getenv, "TTS_ENABLED", false); err != nil {
+		return TTSConfig{}, err
+	}
+	if cfg.Streaming, err = parseBool(getenv, "TTS_STREAMING", tts.IsGeminiModel(cfg.Model)); err != nil {
 		return TTSConfig{}, err
 	}
 	if cfg.SpeakAuthor, err = parseBool(getenv, "TTS_SPEAK_AUTHOR", cfg.SpeakAuthor); err != nil {

@@ -80,7 +80,10 @@ What works now:
   `th-TH-Neural2-C` for Thai and `en-US-Neural2-F` for English, overridable
   via `TTS_VOICE`; or Gemini-TTS when `TTS_MODEL` is set, see
   [Gemini-TTS](#gemini-tts)), and `voice.OggOpusEncoder` demuxes the Ogg pages into
-  20 ms Opus frames in pure Go (no cgo, no `ffmpeg`).
+  20 ms Opus frames in pure Go (no cgo, no `ffmpeg`). Gemini models are
+  streamed over gRPC by default (`TTS_STREAMING`, see
+  [Streaming](#streaming-gemini)): pages are demuxed as they arrive and the
+  bot starts speaking before the sentence is fully synthesized.
 - Audio playback requires `GOOGLE_TTS_API_KEY`. When `TTS_ENABLED=true` but
   `GOOGLE_TTS_API_KEY` is not set, the bot logs a warning at startup and
   falls back to the unimplemented stubs so `/ping` and the rest of the bot
@@ -116,6 +119,7 @@ What works now:
 | `TTS_VOICE`          | *(empty)* | Optional Google voice name override (e.g. `th-TH-Chirp3-HD-Achird`). With a Gemini model: the bare speaker name, default `Charon` |
 | `TTS_MODEL`          | *(empty)* | Gemini-TTS model, e.g. `gemini-2.5-flash-tts`. Empty = Chirp/Neural2 as before (see [Gemini-TTS](#gemini-tts)) |
 | `TTS_PROMPT`         | *(empty)* | Style prompt sent as `input.prompt`; Gemini models only, ignored otherwise |
+| `TTS_STREAMING`      | `true` with a Gemini `TTS_MODEL`, else `false` | Gemini only: synthesize over the gRPC streaming API and start speaking at the first audio (see [Streaming](#streaming-gemini)). Needs `GOOGLE_APPLICATION_CREDENTIALS`. Ignored for Chirp/Neural2 |
 | `TTS_MONTHLY_BUDGET_THB` | `300` | Gemini only: money cap in baht per US/Pacific month; reading pauses once spend reaches it. `0` = no cap |
 | `TTS_USD_TO_THB`     | `33`    | Gemini only: exchange rate used to turn the USD price into baht |
 | `TTS_MAX_CHARS`      | `200`   | Max characters spoken per message                             |
@@ -145,12 +149,15 @@ Cloud Text-to-Speech `v1/text:synthesize` request with Gemini fields:
   เหมือนเพื่อนคุยกันในวงเกม`). It is sent only to Gemini models, never to
   Chirp/Neural2, which reject it. Its length is billed as input on every
   message, so keep it short.
-- Authentication is unchanged: an API key in `X-Goog-Api-Key`.
+- Authentication is a service account (`GOOGLE_APPLICATION_CREDENTIALS`, see
+  setup below); API keys are rejected for Gemini models.
 - The audio is the same 48 kHz Ogg/Opus (single 20 ms frames), so the voice
   pipeline needs no change.
-- **Latency:** expect roughly **3–4 s more** per message than Chirp 3 HD
-  before speech starts, because Gemini generates the whole clip before
-  returning it. Messages queue as before, so a busy chat falls further behind.
+- **Latency:** with the unary REST call (`TTS_STREAMING=false`) expect roughly
+  **3–4 s more** per message than Chirp 3 HD before speech starts (about 4 s
+  for one sentence vs about 1 s), because the whole clip is generated before
+  it is returned. Streaming, the default, is meant to cut that; see below.
+  Messages queue as before, so a busy chat falls further behind.
 
 **Setup** (in addition to the Cloud Text-to-Speech steps above):
 
@@ -176,6 +183,50 @@ TTS_MONTHLY_BUDGET_THB=300
 ```
 
 `TTS_MONTHLY_CHAR_LIMIT` is ignored while `TTS_MODEL` is a Gemini model.
+
+### Streaming (Gemini)
+
+With a Gemini `TTS_MODEL` and `GOOGLE_APPLICATION_CREDENTIALS`, the bot uses
+the gRPC `StreamingSynthesize` call of Cloud Text-to-Speech
+(`texttospeech.googleapis.com:443`) instead of `v1/text:synthesize`. It is on
+by default; `TTS_STREAMING=false` goes back to the unary REST call. Chirp and
+Neural2 voices always use REST.
+
+- One call per message: a `StreamingSynthesizeConfig` (same voice, language
+  and `model_name` as the REST request, `OGG_OPUS` at 48 kHz), then one
+  `StreamingSynthesisInput` with the text and `TTS_PROMPT`. Same service
+  account, same token source as the REST client.
+- Each `audio_content` chunk goes straight into an incremental Ogg demuxer;
+  every Ogg page's Opus packets are queued for sending as soon as the page is
+  complete, and playback starts with the first one while the rest is still
+  arriving. Pacing (20 ms), the queue and "one message at a time" are
+  unchanged.
+- `/tts leave`, the bot leaving on its own, or shutdown cancel the call in
+  flight. A stream that sends no audio for 30 s is abandoned.
+- **Fallback:** if the stream fails before any audio arrives (an error, or
+  the call ends without audio), the bot logs
+  `tts: google: stream failed before any audio, retrying once with REST: ...`
+  and synthesizes that message once with the REST call. A failure after
+  audio has started is reported and not retried.
+- **Billing:** a streamed message is charged when its stream ends, for the
+  audio actually received (see [Money](#money-gemini)), including a stream
+  cut off by an error or by the bot leaving.
+
+**Comparing latency.** Every message logs one line, whichever path it took:
+
+```
+tts: timing path=stream first_audio=412ms total=2.31s bytes=9123
+tts: timing path=rest first_audio=3.9s total=3.9s bytes=9087
+tts: timing path=rest-fallback first_audio=4.2s total=4.2s bytes=9101
+```
+
+`first_audio` is from sending the request to the first audio byte (what the
+listener waits for, give or take one Ogg page); `total` is until the last
+byte. For REST both are the same. `rest-fallback` includes the failed stream
+attempt. To compare, run a while with each setting and read
+`kubectl logs <pod> | grep 'tts: timing'`. On startup the bot logs
+`tts: streaming gemini-2.5-flash-tts over gRPC (TTS_STREAMING)` when
+streaming is active.
 
 ### Cost
 
@@ -242,6 +293,12 @@ cost = audio seconds × 25 × $10 / 1M  +  input tokens × $0.50 / 1M     (× TT
   character over-counts Thai, so the estimate errs towards spending too
   much, and input is only about 1/20 of the audio cost anyway.
 - Failed requests are not charged.
+- **Streamed messages** ([Streaming](#streaming-gemini)) are charged once,
+  when the stream ends, from the complete Ogg pages received: granule of the
+  last one minus the pre-skip. A stream that breaks or is cancelled halfway
+  pays for the part that arrived; one that delivers no audio pays nothing.
+  Audio Google generated but had not yet delivered when the bot cancelled is
+  not visible to the bot and not counted.
 - **Budget check:** the cost is unknown until the audio comes back, so the bot
   can only check before a request that the spend so far has not yet reached
   `TTS_MONTHLY_BUDGET_THB`. The message that crosses the budget is spoken, so
@@ -303,7 +360,9 @@ when the bot restarts, and a warning is logged at startup.
 
 ### Host requirements
 
-None beyond network access to Discord and `texttospeech.googleapis.com`.
+None beyond network access to Discord and `texttospeech.googleapis.com`
+(HTTPS for REST; gRPC over HTTP/2 on the same host and port 443 for
+streaming, so an egress proxy or firewall must allow HTTP/2 there).
 Google Cloud TTS returns 48 kHz Ogg/Opus directly and SONNIE demuxes it in
 pure Go, so neither cgo nor `ffmpeg` is needed at runtime and the container
 image remains `distroless/static`.

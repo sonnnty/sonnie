@@ -250,6 +250,14 @@ func (m *Meter) Synthesize(ctx context.Context, text, lang string) (tts.Audio, e
 // synthesizer, because a failed request may still be billed, and refuses with
 // a *LimitError when the count would exceed the limit.
 func (m *Meter) synthesizeChars(ctx context.Context, text, lang string) (tts.Audio, error) {
+	if err := m.reserveChars(text); err != nil {
+		return tts.Audio{}, err
+	}
+	return m.cfg.Inner.Synthesize(ctx, text, lang)
+}
+
+// reserveChars counts text against the character cap, or refuses.
+func (m *Meter) reserveChars(text string) error {
 	n := int64(runeCount(text))
 
 	m.mu.Lock()
@@ -259,7 +267,7 @@ func (m *Meter) synthesizeChars(ctx context.Context, text, lang string) (tts.Aud
 		alerts := m.claimAlertsLocked(100)
 		m.mu.Unlock()
 		m.sendAlerts(alerts)
-		return tts.Audio{}, limitErr
+		return limitErr
 	}
 	m.used += n
 	m.version++
@@ -267,13 +275,28 @@ func (m *Meter) synthesizeChars(ctx context.Context, text, lang string) (tts.Aud
 	m.mu.Unlock()
 
 	m.sendAlerts(alerts)
-	return m.cfg.Inner.Synthesize(ctx, text, lang)
+	return nil
 }
 
 // synthesizeMoney refuses when the spend so far has already reached the
 // budget, otherwise calls the inner synthesizer and charges the cost of the
 // audio it returned. Failed requests are not charged.
 func (m *Meter) synthesizeMoney(ctx context.Context, text, lang string) (tts.Audio, error) {
+	if err := m.checkBudget(); err != nil {
+		return tts.Audio{}, err
+	}
+
+	audio, err := m.cfg.Inner.Synthesize(ctx, text, lang)
+	if err != nil {
+		return audio, err
+	}
+	m.chargeAudio(audioDuration(audio), EstimateInputTokens(text, m.cfg.Prompt))
+	return audio, nil
+}
+
+// checkBudget refuses with a *LimitError once the spend has reached the
+// budget. It runs before every request, streamed or not.
+func (m *Meter) checkBudget() error {
 	m.mu.Lock()
 	m.rolloverLocked()
 	if m.cfg.Limit > 0 && m.used >= m.cfg.Limit {
@@ -281,17 +304,15 @@ func (m *Meter) synthesizeMoney(ctx context.Context, text, lang string) (tts.Aud
 		alerts := m.claimAlertsLocked(100)
 		m.mu.Unlock()
 		m.sendAlerts(alerts)
-		return tts.Audio{}, limitErr
+		return limitErr
 	}
 	m.mu.Unlock()
+	return nil
+}
 
-	audio, err := m.cfg.Inner.Synthesize(ctx, text, lang)
-	if err != nil {
-		return audio, err
-	}
-
-	dur := audioDuration(audio)
-	cost := CostMicroTHB(dur, EstimateInputTokens(text, m.cfg.Prompt), m.cfg.USDToTHB)
+// chargeAudio adds the cost of dur of generated audio and the input tokens.
+func (m *Meter) chargeAudio(dur time.Duration, inputTokens int64) {
+	cost := CostMicroTHB(dur, inputTokens, m.cfg.USDToTHB)
 
 	m.mu.Lock()
 	m.rolloverLocked()
@@ -301,7 +322,6 @@ func (m *Meter) synthesizeMoney(ctx context.Context, text, lang string) (tts.Aud
 	alerts := m.claimAlertsLocked(m.percentLocked())
 	m.mu.Unlock()
 	m.sendAlerts(alerts)
-	return audio, nil
 }
 
 // refuseLocked records a refusal and builds its error.
@@ -323,8 +343,12 @@ func audioDuration(a tts.Audio) time.Duration {
 			return d
 		}
 	}
-	d := time.Duration(len(a.Data)) * 8 * time.Second / minOpusBitrate
-	log.Printf("usage: could not read the audio duration; billing an upper bound of %v from %d bytes", d, len(a.Data))
+	return durationUpperBound(len(a.Data))
+}
+
+func durationUpperBound(n int) time.Duration {
+	d := time.Duration(n) * 8 * time.Second / minOpusBitrate
+	log.Printf("usage: could not read the audio duration; billing an upper bound of %v from %d bytes", d, n)
 	return d
 }
 

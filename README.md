@@ -42,18 +42,83 @@ setter that the bot calls once at startup (see `SetTTS` in `tts.go`).
 
 ## Read chat aloud (`/tts`)
 
-`/tts join` makes the bot join your voice channel and read new messages
-from the text channel you ran it in. `/tts leave` stops reading and leaves
-the voice channel. `/tts usage` shows this month's Google TTS usage, in
-characters or baht (see [Usage cap and alerts](#usage-cap-and-alerts)). Each server can
-have one active binding.
+Reading aloud is **opt-in per person** and lives in a **session**. `/tts join`
+(run in the text channel you want read, while you are in a voice channel) joins
+the session: from then on the bot reads **your** messages in that channel
+aloud in the voice channel, and nobody else's. `/tts leave` takes you out
+again. `/tts usage` shows this month's Google TTS usage, in characters or baht
+(see [Usage cap and alerts](#usage-cap-and-alerts)). Each server has at most
+one session.
+
+### How a session looks in Discord
+
+1. The **first** `/tts join` in a server makes the bot join your voice channel
+   and post **one public session message** (a Thai embed) in the text channel:
+   who takes part (as mentions, which do not notify anyone), the text and voice
+   channel, when it started, and how to join and leave. You get a private
+   (ephemeral) confirmation.
+2. Anyone else in **the same voice channel** runs `/tts join` **in the same
+   text channel**. They are added and the bot **edits** the session message;
+   it never posts a second one. They get a private confirmation.
+3. `/tts leave` removes you and edits the message. When the last participant
+   leaves, the session ends.
+4. When a session ends (last participant left, nobody but bots left in the
+   voice channel, the bot was disconnected or moved, or the bot shuts down),
+   the bot **deletes the messages the participants wrote** in that text channel
+   during the session and turns the session message into a short summary that
+   stays in the channel as a log:
+
+   ```
+   📝 จบการอ่านออกเสียง · ผู้เข้าร่วม: @a, @b · 25 นาที · ลบข้อความแล้ว 42 ข้อความ
+   ```
+
+Refusals are private and say what to do instead:
+
+- `/tts join` from a **different voice channel** while the session's voice
+  channel still has people in it: refused, naming the busy channel. If nobody
+  is left there, the old session is ended (with clean-up) and the new one starts.
+- `/tts join` from a **different text channel** while the session in your voice
+  channel is bound to another one: refused, naming the bound text channel.
+- `/tts leave` when you are not in the session, or no session runs.
+
+What gets deleted at the end, exactly: messages in the session's text channel
+by **anyone who took part at any time** (including people who joined and later
+left), created **after the session message and before the session ended**.
+Never touched: messages by people who did not join, messages in other
+channels, anything from before the session, and the bot's own session message.
+Messages younger than 14 days go through Discord's bulk delete (chunks of at
+most 100); older ones are deleted one by one. The bot also remembers the
+participants' messages as they arrive, and scans the channel history after the
+session message when it ends, so a missed event or a restart does not leave
+messages behind. Because anything a participant writes in the channel during
+the session is deleted, `/tts join` tells people so.
+
+**Manage Messages** is needed for the deletion. The bot checks it in the text
+channel when the session starts. If it is missing, the session message turns
+orange and says nothing will be deleted, and the summary says
+`ไม่ได้ลบข้อความ`; the bot does not fail and reading works as usual.
+Participants are told at the start whether their messages will be deleted, so
+the bot does not delete anything if it did not have the permission then.
+
+If the bot **restarts** during a session, the session is lost (it leaves
+voice). The session message carries a hidden marker in its footer (like the
+usage status message) listing the participants. When the bot comes back it
+looks through the last 300 messages of each channel it can read for its own
+unfinished session messages and finishes their clean-up and summary. A session
+message that has been pushed out of that window by a busy channel is left as
+it is.
+
+Each session start, join, leave and end is logged as one line (user IDs and
+counts) for `kubectl logs`, e.g. `tts: session end guild=… reason="last
+participant left" users=… duration=25m0s deleted=42 failed=0`.
 
 ### Status
 
 What works now:
 
-- `/tts join` and `/tts leave`, one binding per server. Running `join`
-  again moves the binding.
+- `/tts join` and `/tts leave`: opt-in sessions, one per server, with one
+  session message and clean-up when it ends (see above). Only participants'
+  messages are spoken.
 - Message filtering and clean-up: bot, webhook and empty messages are
   ignored. Mentions become names (from cache) or are dropped. URLs become
   "ลิงก์" (or "link" when `TTS_LANG` isn't Thai). Custom emoji, timestamps,
@@ -62,9 +127,9 @@ What works now:
 - A per-server queue that speaks messages in order. When it is full the
   **oldest waiting message is dropped**, because in a live chat the newest
   messages matter most.
-- The bot leaves automatically when nobody (other than bots) is left in the
-  voice channel, and drops the binding if it is disconnected from voice or
-  moved to another channel.
+- The bot leaves automatically (ending the session, with clean-up) when nobody
+  (other than bots) is left in the voice channel, or if it is disconnected from
+  voice or moved to another channel.
 - Voice transport: the bot joins through disgo's voice client, which uses
   voice gateway v8 and `aead_aes256_gcm_rtpsize`/`aead_xchacha20_poly1305_rtpsize`
   transport encryption. DAVE end-to-end encryption, which Discord requires
@@ -96,9 +161,23 @@ What works now:
    **Message Content Intent**. It is a privileged intent. If it is not
    enabled, the bot cannot connect at all while `TTS_ENABLED=true`.
 2. Make sure the bot has the **View Channel**, **Connect** and **Speak**
-   permissions in the voice channels it should join, and **View Channel**
-   and **Read Message History** in the text channels it should read. When
-   inviting the bot, include the `bot` and `applications.commands` scopes.
+   permissions in the voice channels it should join, and in the text channels
+   where people run `/tts join` it needs **View Channel**, **Send Messages**,
+   **Embed Links** (the session message is an embed), **Read Message History**
+   (the clean-up scans the history) and **Manage Messages** (to delete the
+   participants' messages when the session ends; without it reading works but
+   nothing is deleted). When inviting the bot, include the `bot` and
+   `applications.commands` scopes. This invite URL asks for exactly those
+   permissions (`3238912` = `0x316C00`: View Channel `0x400`, Send Messages
+   `0x800`, **Manage Messages `0x2000`**, Embed Links `0x4000`, Read Message
+   History `0x10000`, Connect `0x100000`, Speak `0x200000`):
+
+   ```
+   https://discord.com/oauth2/authorize?client_id=<APPLICATION_ID>&scope=bot+applications.commands&permissions=3238912
+   ```
+
+   A bot that is already in the server does not need re-inviting: grant
+   **Manage Messages** to its role (or to the channel) in the server settings.
 3. Create a Google Cloud Text-to-Speech API key:
    - In the [Google Cloud Console](https://console.cloud.google.com/), create
      or select a GCP project with billing enabled.

@@ -27,8 +27,9 @@ func newReadAloud(s *discordgo.Session, cfg config.TTSConfig) (*readaloud.Manage
 		Synth:   synth,
 		Encoder: encoder,
 		// Registers its own voice event handlers on s.
-		Joiner:   voice.NewDAVEJoiner(s),
-		Presence: statePresence{s: s},
+		Joiner:    voice.NewDAVEJoiner(s),
+		Presence:  statePresence{s: s},
+		Messenger: newDiscordMessenger(s),
 
 		Lang:        cfg.Lang,
 		MaxChars:    cfg.MaxChars,
@@ -95,16 +96,26 @@ func newSpeechPipeline(cfg config.TTSConfig) (tts.Synthesizer, voice.Encoder) {
 }
 
 func (b *Bot) handleMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
-	if m.GuildID == "" || m.Author == nil {
+	if m.GuildID == "" || m.Author == nil || !isUserMessage(m.Message) {
 		return
 	}
 	b.readAloud.HandleMessage(readaloud.Message{
 		GuildID:    m.GuildID,
 		ChannelID:  m.ChannelID,
+		MessageID:  m.ID,
+		Time:       messageTime(m.Message),
+		AuthorID:   m.Author.ID,
 		AuthorName: authorName(m.Message),
 		Content:    m.Content,
 		IsBot:      m.Author.Bot || m.WebhookID != "" || (s.State.User != nil && m.Author.ID == s.State.User.ID),
 	}, messageNames{s: s, m: m.Message})
+}
+
+// handleGuildCreate finishes the clean-up of sessions that a previous run of
+// the bot left unfinished in the guild. Guilds arrive after the gateway is
+// ready, which is why this is not done in Open.
+func (b *Bot) handleGuildCreate(_ *discordgo.Session, g *discordgo.GuildCreate) {
+	b.readAloud.RecoverGuild(context.Background(), g.ID)
 }
 
 func (b *Bot) handleVoiceStateUpdate(_ *discordgo.Session, v *discordgo.VoiceStateUpdate) {

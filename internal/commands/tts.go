@@ -16,8 +16,8 @@ import (
 
 // TTSController is what /tts needs from the read-aloud manager.
 type TTSController interface {
-	Join(ctx context.Context, guildID, voiceChannelID, textChannelID string) error
-	Leave(guildID string) error
+	Join(ctx context.Context, req readaloud.JoinRequest) (readaloud.JoinResult, error)
+	Leave(guildID, userID string) (readaloud.LeaveResult, error)
 }
 
 // UsageReporter is what /tts usage needs from the TTS usage meter.
@@ -55,12 +55,12 @@ func init() {
 				{
 					Type:        discordgo.ApplicationCommandOptionSubCommand,
 					Name:        "join",
-					Description: "Join your voice channel and read this channel aloud",
+					Description: "Join the read-aloud session; your messages here are read aloud and deleted when it ends",
 				},
 				{
 					Type:        discordgo.ApplicationCommandOptionSubCommand,
 					Name:        "leave",
-					Description: "Stop reading and leave the voice channel",
+					Description: "Leave the read-aloud session (the bot leaves voice when the last person leaves)",
 				},
 				{
 					Type:        discordgo.ApplicationCommandOptionSubCommand,
@@ -75,12 +75,12 @@ func init() {
 
 func handleTTS(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	if i.GuildID == "" || i.Member == nil || i.Member.User == nil {
-		ttsRespond(s, i, "/tts only works in a server.")
+		ttsRespondEphemeral(s, i, "/tts ใช้ได้เฉพาะในเซิร์ฟเวอร์")
 		return
 	}
 	ctl := ttsController
 	if ctl == nil {
-		ttsRespond(s, i, "Reading chat aloud is not enabled on this bot.")
+		ttsRespondEphemeral(s, i, "บอทนี้ไม่ได้เปิดใช้การอ่านแชทออกเสียง")
 		return
 	}
 
@@ -88,55 +88,99 @@ func handleTTS(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	if len(options) == 0 {
 		return
 	}
+	userID := i.Member.User.ID
 	switch options[0].Name {
 	case "join":
-		vs, err := s.State.VoiceState(i.GuildID, i.Member.User.ID)
+		vs, err := s.State.VoiceState(i.GuildID, userID)
 		if err != nil || vs.ChannelID == "" {
-			ttsRespond(s, i, "Join a voice channel first, then run /tts join.")
+			ttsRespondEphemeral(s, i, "เข้าห้องเสียงก่อน แล้วค่อยใช้ /tts join")
 			return
 		}
 		// Joining voice can take longer than the 3 s Discord allows for a
-		// first response, so acknowledge now and edit the reply later.
+		// first response, so acknowledge now and edit the reply later. The
+		// public message is the session message in the channel; this reply
+		// is only for the caller.
 		if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{Flags: discordgo.MessageFlagsEphemeral},
 		}); err != nil {
 			log.Printf("tts: failed to defer interaction: %v", err)
 			return
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), ttsJoinTimeout)
 		defer cancel()
-		reply := ttsJoinReply(ctx, ctl, i.GuildID, vs.ChannelID, i.ChannelID)
+		reply := ttsJoinReply(ctx, ctl, readaloud.JoinRequest{
+			GuildID:        i.GuildID,
+			UserID:         userID,
+			VoiceChannelID: vs.ChannelID,
+			TextChannelID:  i.ChannelID,
+		})
 		if _, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{Content: &reply}); err != nil {
 			log.Printf("tts: failed to edit interaction response: %v", err)
 		}
 	case "leave":
-		ttsRespond(s, i, ttsLeaveReply(ctl, i.GuildID))
+		ttsRespondEphemeral(s, i, ttsLeaveReply(ctl, i.GuildID, userID))
 	case "usage":
 		ttsRespondData(s, i, ttsUsageResponse(usageReporter, time.Now()))
 	}
 }
 
-func ttsJoinReply(ctx context.Context, ctl TTSController, guildID, voiceChannelID, textChannelID string) string {
-	if err := ctl.Join(ctx, guildID, voiceChannelID, textChannelID); err != nil {
-		log.Printf("tts: join guild %s channel %s: %v", guildID, voiceChannelID, err)
-		if errors.Is(err, context.DeadlineExceeded) {
-			return "Joining your voice channel timed out — the voice connection may have been slow or failed, or I may be missing the Connect and Speak permissions there."
+const ttsDeleteNotice = "ข้อความที่คุณพิมพ์ในห้องนี้ระหว่างการอ่านจะถูกลบเมื่อจบ"
+
+func ttsJoinReply(ctx context.Context, ctl TTSController, req readaloud.JoinRequest) string {
+	res, err := ctl.Join(ctx, req)
+	if err != nil {
+		var busy *readaloud.BusyError
+		var wrongText *readaloud.TextChannelError
+		switch {
+		case errors.As(err, &busy):
+			return fmt.Sprintf("ตอนนี้บอทกำลังอ่านออกเสียงอยู่ในห้องเสียง <#%s> (ห้องข้อความ <#%s>) และยังมีคนอยู่ — ไปเข้าร่วมที่นั่น หรือรอให้จบก่อน",
+				busy.VoiceChannelID, busy.TextChannelID)
+		case errors.As(err, &wrongText):
+			return fmt.Sprintf("ห้องเสียงนี้กำลังอ่านจากห้องข้อความ <#%s> — ใช้ /tts join ในห้อง <#%s> แทน",
+				wrongText.TextChannelID, wrongText.TextChannelID)
+		case errors.Is(err, readaloud.ErrSessionMessage):
+			log.Printf("tts: join guild %s channel %s: %v", req.GuildID, req.VoiceChannelID, err)
+			return "บอทส่งข้อความเซสชันในห้องนี้ไม่ได้ — ตรวจสอบว่าบอทมีสิทธิ์ View Channel, Send Messages และ Embed Links ในห้องนี้"
 		}
-		return "I couldn't join your voice channel. Check that I have the Connect and Speak permissions there, or try again if the voice connection failed."
+		log.Printf("tts: join guild %s channel %s: %v", req.GuildID, req.VoiceChannelID, err)
+		if errors.Is(err, context.DeadlineExceeded) {
+			return "เข้าห้องเสียงไม่ทันเวลา — การเชื่อมต่อเสียงอาจช้าหรือล้มเหลว หรือบอทอาจไม่มีสิทธิ์ Connect และ Speak ในห้องนั้น"
+		}
+		return "บอทเข้าห้องเสียงของคุณไม่ได้ — ตรวจสอบว่าบอทมีสิทธิ์ Connect และ Speak ในห้องนั้น หรือลองใหม่หากการเชื่อมต่อเสียงล้มเหลว"
 	}
-	return fmt.Sprintf("Reading <#%s> aloud in <#%s>. Use /tts leave to stop.", textChannelID, voiceChannelID)
+
+	var reply string
+	switch {
+	case res.AlreadyIn:
+		return "คุณอยู่ในการอ่านออกเสียงนี้อยู่แล้ว — ออกด้วย /tts leave"
+	case res.Started:
+		reply = fmt.Sprintf("✅ เริ่มอ่านออกเสียงแล้ว — ข้อความของคุณใน <#%s> จะถูกอ่านในห้อง <#%s>", req.TextChannelID, req.VoiceChannelID)
+	default:
+		reply = fmt.Sprintf("✅ เข้าร่วมแล้ว — ข้อความของคุณใน <#%s> จะถูกอ่านในห้อง <#%s> (ผู้เข้าร่วม %d คน)",
+			req.TextChannelID, req.VoiceChannelID, res.Participants)
+	}
+	reply += " ออกด้วย /tts leave"
+	if res.CanManage {
+		return reply + "\n🧹 " + ttsDeleteNotice
+	}
+	return reply + "\n⚠️ บอทไม่มีสิทธิ์ Manage Messages ในห้องนี้ จึงจะไม่ลบข้อความเมื่อจบ"
 }
 
-func ttsLeaveReply(ctl TTSController, guildID string) string {
-	err := ctl.Leave(guildID)
+func ttsLeaveReply(ctl TTSController, guildID, userID string) string {
+	res, err := ctl.Leave(guildID, userID)
 	switch {
 	case errors.Is(err, readaloud.ErrNotBound):
-		return "I'm not reading any channel in this server."
+		return "ตอนนี้ไม่ได้อ่านออกเสียงในเซิร์ฟเวอร์นี้"
+	case errors.Is(err, readaloud.ErrNotParticipant):
+		return "คุณไม่ได้อยู่ในการอ่านออกเสียงนี้ — เข้าร่วมด้วย /tts join"
 	case err != nil:
 		log.Printf("tts: leave guild %s: %v", guildID, err)
-		return "Stopped reading, but leaving the voice channel failed."
+		return "จบการอ่านออกเสียงแล้ว แต่ออกจากห้องเสียงไม่สำเร็จ"
+	case res.Ended:
+		return "ออกแล้ว — จบการอ่านออกเสียงและบอทออกจากห้องเสียง บอทกำลังลบข้อความของผู้เข้าร่วมแล้วสรุปไว้ในข้อความเซสชัน"
 	default:
-		return "Stopped reading and left the voice channel."
+		return fmt.Sprintf("ออกจากการอ่านออกเสียงแล้ว (ยังเหลือผู้เข้าร่วม %d คน)", res.Participants)
 	}
 }
 
@@ -210,11 +254,5 @@ func ttsRespondEphemeral(s *discordgo.Session, i *discordgo.InteractionCreate, c
 	ttsRespondData(s, i, &discordgo.InteractionResponseData{
 		Content: content,
 		Flags:   discordgo.MessageFlagsEphemeral,
-	})
-}
-
-func ttsRespond(s *discordgo.Session, i *discordgo.InteractionCreate, content string) {
-	ttsRespondData(s, i, &discordgo.InteractionResponseData{
-		Content: content,
 	})
 }

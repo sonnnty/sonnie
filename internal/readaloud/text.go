@@ -3,13 +3,20 @@ package readaloud
 import (
 	"regexp"
 	"strings"
+	"time"
 	"unicode"
 )
 
 // Message is the Discord-independent view of a chat message.
 type Message struct {
-	GuildID    string
-	ChannelID  string
+	GuildID   string
+	ChannelID string
+	// MessageID and Time identify the message for clean-up when the session
+	// ends. Time may be zero, which means "now".
+	MessageID string
+	Time      time.Time
+	// AuthorID is the user who wrote it. Only participants are read aloud.
+	AuthorID   string
 	AuthorName string
 	Content    string
 	// IsBot is true for bots, webhooks and SONNIE itself.

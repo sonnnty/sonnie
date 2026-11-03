@@ -110,7 +110,8 @@ What works now:
 | Variable             | Default | Meaning                                                       |
 |----------------------|---------|---------------------------------------------------------------|
 | `TTS_ENABLED`        | `false` | Turns the feature (and the Message Content intent) on         |
-| `GOOGLE_TTS_API_KEY` | *(empty)* | Google Cloud Text-to-Speech API key (required for audio)    |
+| `GOOGLE_TTS_API_KEY` | *(empty)* | Google Cloud Text-to-Speech API key (Chirp/Neural2 voices)   |
+| `GOOGLE_APPLICATION_CREDENTIALS` | *(empty)* | Service account JSON key file; required for Gemini-TTS, wins over the API key |
 | `TTS_LANG`           | `th`    | Language passed to the speech engine (`th`, `en`, `ja`, ...)  |
 | `TTS_VOICE`          | *(empty)* | Optional Google voice name override (e.g. `th-TH-Chirp3-HD-Achird`). With a Gemini model: the bare speaker name, default `Charon` |
 | `TTS_MODEL`          | *(empty)* | Gemini-TTS model, e.g. `gemini-2.5-flash-tts`. Empty = Chirp/Neural2 as before (see [Gemini-TTS](#gemini-tts)) |
@@ -156,11 +157,14 @@ Cloud Text-to-Speech `v1/text:synthesize` request with Gemini fields:
 1. In the GCP project, enable the **Agent Platform API** (the Vertex AI /
    `aiplatform.googleapis.com` API) as well as the Cloud Text-to-Speech API.
 2. Create a **service account** and grant it `roles/aiplatform.user`.
-3. Create an **API key bound to that service account** (Credentials → Create
-   credentials → API key → *Authenticate API calls through a service
-   account*), and restrict it to the **Cloud Text-to-Speech API** and the
-   **Agent Platform API**.
-4. Set `GOOGLE_TTS_API_KEY` to that key, plus the variables below.
+3. Create a **JSON key** for that service account
+   (`gcloud iam service-accounts keys create sa.key --iam-account=<sa-email>`).
+   API keys do not work here, not even ones bound to the service account:
+   the Text-to-Speech endpoint answers `UNAUTHENTICATED API keys are not
+   supported by this API` for Gemini models (checked 2026-11-04).
+4. Set `GOOGLE_APPLICATION_CREDENTIALS` to the path of that file (it takes
+   precedence over `GOOGLE_TTS_API_KEY`), plus the variables below. In k8s,
+   mount it from a Secret.
 
 Environment for the Gemini setup used here:
 

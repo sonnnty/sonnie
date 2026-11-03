@@ -23,6 +23,11 @@ type TTSConfig struct {
 	// GoogleAPIKey is the Google Cloud Text-to-Speech API key
 	// (GOOGLE_TTS_API_KEY). When empty, speech synthesis stays stubbed.
 	GoogleAPIKey string
+	// GoogleCredentialsFile is a service account JSON key file
+	// (GOOGLE_APPLICATION_CREDENTIALS). Gemini-TTS needs it: the endpoint
+	// rejects API keys for Gemini models. It takes precedence over
+	// GoogleAPIKey when both are set.
+	GoogleCredentialsFile string
 	// Lang is the language code passed to the synthesizer.
 	Lang string
 	// Voice, if non-empty, overrides the default voice name selected from
@@ -97,6 +102,7 @@ func loadTTS(getenv func(string) string) (TTSConfig, error) {
 	}
 	cfg.Voice = getenv("TTS_VOICE")
 	cfg.GoogleAPIKey = getenv("GOOGLE_TTS_API_KEY")
+	cfg.GoogleCredentialsFile = strings.TrimSpace(getenv("GOOGLE_APPLICATION_CREDENTIALS"))
 	cfg.Model = strings.TrimSpace(getenv("TTS_MODEL"))
 	cfg.Prompt = strings.TrimSpace(getenv("TTS_PROMPT"))
 

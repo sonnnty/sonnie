@@ -264,3 +264,25 @@ func TestIsGeminiModel(t *testing.T) {
 		}
 	}
 }
+
+// With no API key, an authenticated client (OAuth2 for a service account) is
+// used as is and no X-Goog-Api-Key header is sent.
+func TestGoogle_ClientWithoutAPIKey(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if k := r.Header.Get("X-Goog-Api-Key"); k != "" {
+			t.Errorf("unexpected X-Goog-Api-Key header %q", k)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"audioContent": base64.StdEncoding.EncodeToString([]byte("OggS")),
+		})
+	}))
+	defer srv.Close()
+
+	g := &Google{Endpoint: srv.URL, Client: srv.Client(), Model: "gemini-2.5-flash-tts"}
+	if _, err := g.Synthesize(context.Background(), "สวัสดี", "th"); err != nil {
+		t.Fatalf("Synthesize: %v", err)
+	}
+	if _, err := (&Google{Endpoint: srv.URL}).Synthesize(context.Background(), "x", "th"); err == nil {
+		t.Fatal("want an error with neither API key nor client")
+	}
+}

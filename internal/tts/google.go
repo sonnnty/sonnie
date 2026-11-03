@@ -53,7 +53,8 @@ type Google struct {
 	// Endpoint overrides DefaultGoogleEndpoint; intended for tests.
 	Endpoint string
 	// Client is the HTTP client used for requests. If nil, a client with a
-	// 15 s timeout is used.
+	// 15 s timeout is used. With APIKey empty, Client must authenticate the
+	// requests itself (e.g. an OAuth2 client from NewGoogleOAuthClient).
 	Client *http.Client
 }
 
@@ -93,8 +94,8 @@ type googleErrorResponse struct {
 // Synthesize calls Google Cloud Text-to-Speech and returns FormatOggOpus audio
 // at 48 kHz.
 func (g *Google) Synthesize(ctx context.Context, text, lang string) (Audio, error) {
-	if g.APIKey == "" {
-		return Audio{}, errors.New("tts: google: API key is not set")
+	if g.APIKey == "" && g.Client == nil {
+		return Audio{}, errors.New("tts: google: neither an API key nor an authenticated client is set")
 	}
 
 	payload, err := json.Marshal(g.buildRequest(text, lang))
@@ -111,7 +112,9 @@ func (g *Google) Synthesize(ctx context.Context, text, lang string) (Audio, erro
 		return Audio{}, fmt.Errorf("tts: google: build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json; charset=utf-8")
-	req.Header.Set("X-Goog-Api-Key", g.APIKey)
+	if g.APIKey != "" {
+		req.Header.Set("X-Goog-Api-Key", g.APIKey)
+	}
 
 	client := g.Client
 	if client == nil {

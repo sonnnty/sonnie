@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"context"
 	"log"
 
 	"github.com/bwmarrin/discordgo"
@@ -53,16 +54,26 @@ func newMeter(s *discordgo.Session, cfg config.TTSConfig, inner tts.Synthesizer)
 }
 
 func newSpeechPipeline(cfg config.TTSConfig) (tts.Synthesizer, voice.Encoder) {
-	if cfg.GoogleAPIKey == "" {
-		log.Println("tts: GOOGLE_TTS_API_KEY is not set; /tts join will connect to voice, but speech synthesis is disabled")
-		return tts.Unimplemented{}, voice.UnimplementedEncoder{}
-	}
-	return &tts.Google{
-		APIKey: cfg.GoogleAPIKey,
+	g := &tts.Google{
 		Voice:  cfg.Voice,
 		Model:  cfg.Model,
 		Prompt: cfg.Prompt,
-	}, voice.OggOpusEncoder{}
+	}
+	switch {
+	case cfg.GoogleCredentialsFile != "":
+		client, err := tts.NewGoogleOAuthClient(context.Background(), cfg.GoogleCredentialsFile)
+		if err != nil {
+			log.Printf("%v; speech synthesis is disabled", err)
+			return tts.Unimplemented{}, voice.UnimplementedEncoder{}
+		}
+		g.Client = client
+	case cfg.GoogleAPIKey != "":
+		g.APIKey = cfg.GoogleAPIKey
+	default:
+		log.Println("tts: neither GOOGLE_APPLICATION_CREDENTIALS nor GOOGLE_TTS_API_KEY is set; /tts join will connect to voice, but speech synthesis is disabled")
+		return tts.Unimplemented{}, voice.UnimplementedEncoder{}
+	}
+	return g, voice.OggOpusEncoder{}
 }
 
 func (b *Bot) handleMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {

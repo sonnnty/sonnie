@@ -1,11 +1,14 @@
 package bot
 
 import (
+	"context"
+
 	"github.com/bwmarrin/discordgo"
 
 	"github.com/Sonty15/SONNIE/internal/commands"
 	"github.com/Sonty15/SONNIE/internal/config"
 	"github.com/Sonty15/SONNIE/internal/readaloud"
+	"github.com/Sonty15/SONNIE/internal/usage"
 )
 
 type Bot struct {
@@ -13,6 +16,8 @@ type Bot struct {
 
 	// readAloud is nil when the TTS feature is disabled.
 	readAloud *readaloud.Manager
+	// meter counts Google TTS characters; nil when no Google key is set.
+	meter *usage.Meter
 }
 
 func New(cfg config.Config) (*Bot, error) {
@@ -29,8 +34,11 @@ func New(cfg config.Config) (*Bot, error) {
 		session.Identify.Intents |= discordgo.IntentsGuildMessages |
 			discordgo.IntentsGuildVoiceStates |
 			discordgo.IntentsMessageContent
-		b.readAloud = newReadAloud(session, cfg.TTS)
+		b.readAloud, b.meter = newReadAloud(session, cfg.TTS)
 		commands.SetTTS(b.readAloud)
+		if b.meter != nil {
+			commands.SetUsage(b.meter)
+		}
 	}
 
 	return b, nil
@@ -45,6 +53,12 @@ func (b *Bot) Open() error {
 
 	if err := b.Session.Open(); err != nil {
 		return err
+	}
+
+	if b.meter != nil {
+		// Needs the session open: the bot's own user ID identifies its
+		// status message in the alert channel.
+		b.meter.Start(context.Background())
 	}
 
 	return b.registerCommands()
@@ -73,6 +87,11 @@ func (b *Bot) registerCommands() error {
 func (b *Bot) Close() error {
 	if b.readAloud != nil {
 		b.readAloud.Close()
+	}
+	if b.meter != nil {
+		// After readAloud.Close so no more text is counted; writes the
+		// final count to the alert channel.
+		b.meter.Close()
 	}
 	return b.Session.Close()
 }

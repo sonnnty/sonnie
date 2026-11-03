@@ -1,13 +1,18 @@
 package readaloud
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"log"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/Sonty15/SONNIE/internal/tts"
+	"github.com/Sonty15/SONNIE/internal/usage"
 	"github.com/Sonty15/SONNIE/internal/voice"
 )
 
@@ -331,5 +336,31 @@ func TestManager_CloseLeavesAll(t *testing.T) {
 		if !j.conn(i).Disconnected() {
 			t.Fatalf("connection %d not disconnected", i)
 		}
+	}
+}
+
+func TestManager_LogsLimitErrorOncePerMonth(t *testing.T) {
+	var buf bytes.Buffer
+	orig := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(orig)
+
+	m := New(Config{})
+	nov := fmt.Errorf("synthesize: %w", &usage.LimitError{Month: "2026-11", Used: 10, Limit: 10})
+	for i := 0; i < 5; i++ {
+		if !m.logLimitOnce(nov) {
+			t.Fatal("limit error should be handled")
+		}
+	}
+	if n := strings.Count(buf.String(), "monthly character limit"); n != 1 {
+		t.Fatalf("logged %d times, want 1: %q", n, buf.String())
+	}
+	dec := fmt.Errorf("synthesize: %w", &usage.LimitError{Month: "2026-12", Used: 10, Limit: 10})
+	m.logLimitOnce(dec)
+	if n := strings.Count(buf.String(), "monthly character limit"); n != 2 {
+		t.Fatalf("expected a new log in the next month, got %d", n)
+	}
+	if m.logLimitOnce(errors.New("other")) {
+		t.Fatal("other errors must not be swallowed")
 	}
 }

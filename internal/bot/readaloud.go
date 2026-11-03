@@ -8,11 +8,19 @@ import (
 	"github.com/Sonty15/SONNIE/internal/config"
 	"github.com/Sonty15/SONNIE/internal/readaloud"
 	"github.com/Sonty15/SONNIE/internal/tts"
+	"github.com/Sonty15/SONNIE/internal/usage"
 	"github.com/Sonty15/SONNIE/internal/voice"
 )
 
-func newReadAloud(s *discordgo.Session, cfg config.TTSConfig) *readaloud.Manager {
+// newReadAloud builds the read-aloud manager. The returned meter is nil when
+// no real synthesizer is configured (nothing is billed then).
+func newReadAloud(s *discordgo.Session, cfg config.TTSConfig) (*readaloud.Manager, *usage.Meter) {
 	synth, encoder := newSpeechPipeline(cfg)
+	var meter *usage.Meter
+	if _, ok := synth.(*tts.Google); ok {
+		meter = newMeter(s, cfg, synth)
+		synth = meter
+	}
 	return readaloud.New(readaloud.Config{
 		Synth:   synth,
 		Encoder: encoder,
@@ -24,7 +32,15 @@ func newReadAloud(s *discordgo.Session, cfg config.TTSConfig) *readaloud.Manager
 		MaxChars:    cfg.MaxChars,
 		QueueSize:   cfg.QueueSize,
 		SpeakAuthor: cfg.SpeakAuthor,
-	})
+	}), meter
+}
+
+func newMeter(s *discordgo.Session, cfg config.TTSConfig, inner tts.Synthesizer) *usage.Meter {
+	mc := usage.Config{Inner: inner, Limit: cfg.MonthlyCharLimit}
+	if cfg.AlertChannelID != "" {
+		mc.Channel = newDiscordUsageChannel(s, cfg.AlertChannelID)
+	}
+	return usage.New(mc)
 }
 
 func newSpeechPipeline(cfg config.TTSConfig) (tts.Synthesizer, voice.Encoder) {

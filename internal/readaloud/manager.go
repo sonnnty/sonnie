@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/Sonty15/SONNIE/internal/tts"
+	"github.com/Sonty15/SONNIE/internal/usage"
 	"github.com/Sonty15/SONNIE/internal/voice"
 )
 
@@ -64,6 +65,11 @@ type Manager struct {
 
 	mu       sync.Mutex
 	bindings map[string]*binding
+
+	// limitLogged is the month for which the monthly-limit error was last
+	// logged, so it is logged once rather than for every skipped message.
+	limitMu     sync.Mutex
+	limitLogged string
 }
 
 // New creates a Manager.
@@ -73,6 +79,23 @@ func New(cfg Config) *Manager {
 		linkWord: DefaultLinkWord(cfg.Lang),
 		bindings: make(map[string]*binding),
 	}
+}
+
+// logLimitOnce handles usage.ErrLimitReached: it logs the first one each month
+// and reports true (handled) for all of them, so skipped messages stay quiet.
+func (m *Manager) logLimitOnce(err error) bool {
+	var le *usage.LimitError
+	if !errors.As(err, &le) {
+		return false
+	}
+	m.limitMu.Lock()
+	first := m.limitLogged != le.Month
+	m.limitLogged = le.Month
+	m.limitMu.Unlock()
+	if first {
+		log.Printf("tts: monthly character limit reached (%d/%d in %s); messages are skipped until next month", le.Used, le.Limit, le.Month)
+	}
+	return true
 }
 
 // Join binds textChannelID in guildID to voiceChannelID, joining the voice
@@ -113,6 +136,9 @@ func (m *Manager) Join(ctx context.Context, guildID, voiceChannelID, textChannel
 			Lang:      m.cfg.Lang,
 			QueueSize: m.cfg.QueueSize,
 			OnError: func(err error) {
+				if m.logLimitOnce(err) {
+					return
+				}
 				log.Printf("tts: guild %s: %v", guildID, err)
 			},
 		}),

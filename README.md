@@ -221,8 +221,9 @@ Counting only happens when `GOOGLE_TTS_API_KEY` is set. Because the bot
 counts what it sends, the meter is only accurate if nothing else uses the same
 API key.
 
-`/tts usage` replies (only to you) with this month's characters used, the
-limit, the percentage and whether reading is paused.
+`/tts usage` replies (only to you) with a compact Discord embed showing this
+month's progress bar, characters used, audio generated, status, and reset
+timestamp.
 
 #### Money (Gemini)
 
@@ -253,28 +254,37 @@ cost = audio seconds × 25 × $10 / 1M  +  input tokens × $0.50 / 1M     (× TT
 - The meter only sees this bot's requests; anything else using the same key is
   not counted.
 
-`/tts usage` replies (only to you) with the spend, the budget, the percentage,
-whether reading is paused, and the seconds of audio generated this month, e.g.
-`Google TTS spend for 2026-11 (US/Pacific month): ฿240.00 / ฿300.00 budget
-(80%). Reading is active. Audio generated: 29000.0 s.`
+`/tts usage` replies (only to you) with a compact Thai Discord embed, e.g.:
 
-Alerts use the same 50/80/100% thresholds, in baht:
-`⚠️ Google TTS ใช้ไป 80% ของงบเดือนนี้ (฿240.00 / ฿300.00)`.
+```
+🔊 Google TTS · พฤศจิกายน 2026
+▰▰▱▱▱▱▱▱▱▱  12%
+฿36.20 / ฿300.00
+เสียงที่สร้าง: 6.7 วินาที   สถานะ: 🟢 กำลังอ่าน   รีเซ็ต: <t:unix:R>
+```
+
+Embed color reflects percentage (green < 50%, yellow 50–79%, orange 80–99%, red ≥ 100%).
 
 #### Alerts and persistence (both meters)
 
 **Alerts.** Set `TTS_ALERT_CHANNEL_ID` to a text channel's ID (enable Developer
 Mode in Discord, right-click the channel, *Copy Channel ID*). The bot posts a
-Thai message the first time usage crosses 50%, 80% and 100% in a month, e.g.
-`⚠️ Google TTS ใช้ไป 80% ของโควตาเดือนนี้ (800,000 / 1,000,000 ตัวอักษร)`;
-the 100% message says reading is paused until next month. It also fires when
-a message is refused for not fitting in what is left, since usage may never
-land exactly on 100%. Each threshold fires once per month, also across
-restarts.
+notification preview line and a small embed card the first time usage crosses 50%,
+80% and 100% in a month (colors match the thresholds):
+
+```
+⚠️ Google TTS ใช้ไป 80% ของงบเดือนนี้
+[Embed: 🔊 Google TTS · พฤศจิกายน 2026 | ▰▰▰▰▰▰▰▰▱▱  80% | ฿240.00 / ฿300.00]
+```
+
+The 100% message announces that reading is paused until next month. It also fires
+when a message is refused for not fitting in what is left, since usage may never
+land exactly on 100%. Each threshold fires once per month, also across restarts.
 
 **Persistence.** The deployment has no persistent volume, so the counter lives
-in Discord: the bot keeps one status message in the alert channel with a
-machine-readable marker line in a code block:
+in Discord: the bot keeps one status message in the alert channel as an embed
+(no visible code block). The machine-readable marker is kept in the embed footer text
+after `อัปเดตอัตโนมัติ · อย่าลบข้อความนี้`:
 
 ```
 sonnie-tts-usage v2 month=2026-11 unit=chars value=12345 audio_ms=0 alerted=50,80
@@ -285,16 +295,17 @@ sonnie-tts-usage v2 month=2026-11 unit=thb_micro value=240000000 audio_ms=290000
 (`240000000` = ฿240.00). `audio_ms` is the audio generated this month.
 
 On startup the bot scans the channel's last 100 messages for the newest such
-message written by itself and restores the count from it. A marker from a
-different month, or in a different unit, means start at 0 (the reason is
-logged): the money meter starts at ฿0 when it finds an old `v1` (characters)
-marker or a `unit=chars` one, e.g. right after switching to Gemini, and the
-character meter does the same for a `unit=thb_micro` one. A `v1` marker is
-still read by the character meter. The bot edits that message at most once a
-minute, only when the count changed, and once more on shutdown. A crash can
-lose up to a minute of counts. Do not delete the status message or let
-100+ messages pile up after it in that channel; if it cannot be found the
-count restarts at 0. Use a dedicated channel.
+message written by itself and restores the count from it (supporting both the
+embed footer marker and legacy plain-content markers, migrating old-format messages
+to the embed format on startup). A marker from a different month, or in a different
+unit, means start at 0 (the reason is logged): the money meter starts at ฿0 when it
+finds an old `v1` (characters) marker or a `unit=chars` one, e.g. right after
+switching to Gemini, and the character meter does the same for a `unit=thb_micro`
+one. A `v1` marker is still read by the character meter. The bot edits that message
+at most once a minute, only when the count changed, and once more on shutdown. A
+crash can lose up to a minute of counts. Do not delete the status message or let
+100+ messages pile up after it in that channel; if it cannot be found the count
+restarts at 0. Use a dedicated channel.
 
 The bot needs **View Channel**, **Send Messages** and **Read Message History**
 in the alert channel (no pinning, no other permissions). If

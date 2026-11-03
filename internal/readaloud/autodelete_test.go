@@ -442,3 +442,23 @@ func TestAutoDelete_CloseCancelsPendingTimers(t *testing.T) {
 		t.Fatalf("calls %v, deleted=%v, summary %q", e.singles(), e.msgr.isDeleted(id), got)
 	}
 }
+
+// The live session embed must say messages go after being read when
+// per-message deletion is on, and only at the end when it is off.
+func TestAutoDelete_SessionEmbedFooterSaysWhenMessagesGo(t *testing.T) {
+	for _, tc := range []struct {
+		after time.Duration
+		want  string
+	}{
+		{8 * time.Second, "ลบข้อความหลังอ่าน"},
+		{0, "ลบข้อความเมื่อจบ"},
+	} {
+		e, _ := newDeleteEnv(t)
+		e.m.cfg.DeleteAfter = tc.after
+		e.mustJoin("u1")
+		emb := e.msgr.embed(e.sessionMessage())
+		if emb == nil || emb.Footer == nil || !strings.Contains(emb.Footer.Text, tc.want) {
+			t.Errorf("DeleteAfter=%v: footer %+v, want it to contain %q", tc.after, emb.Footer, tc.want)
+		}
+	}
+}

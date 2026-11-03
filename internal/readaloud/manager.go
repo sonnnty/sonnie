@@ -169,6 +169,7 @@ func (s *session) view() sessionView {
 		VoiceChannelID: s.voiceChannelID,
 		Started:        s.started,
 		Manage:         s.manage,
+		PerMessage:     s.perMessage,
 		Participants:   slices.Clone(s.participants),
 		Left:           slices.Clone(s.left),
 	}
@@ -604,6 +605,10 @@ type endedSession struct {
 	reason    string
 	// live is the session's per-message deletions; nil for a recovered one.
 	live *liveDeletes
+	// src is the live session this was detached from (nil when recovered
+	// after a restart); its tracked set is re-read once in-flight deletes
+	// are done, so messages they removed are not retried.
+	src *session
 }
 
 // endLocked removes s from its guild, leaves voice and starts the clean-up in
@@ -648,6 +653,7 @@ func (m *Manager) detach(s *session, reason string, disconnect bool) error {
 		ended:     m.cfg.Now(),
 		reason:    reason,
 		live:      s.live,
+		src:       s,
 	}
 	m.mu.Unlock()
 
@@ -678,6 +684,9 @@ func (m *Manager) finish(ctx context.Context, e endedSession) {
 		e.live.wg.Wait()
 		m.mu.Lock()
 		live = e.live.deleted
+		if e.src != nil {
+			e.tracked = maps.Clone(e.src.tracked)
+		}
 		m.mu.Unlock()
 	}
 	// The participants were told whether their messages would be deleted when

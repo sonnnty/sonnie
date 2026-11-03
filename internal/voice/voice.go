@@ -25,6 +25,25 @@ type Encoder interface {
 	Encode(ctx context.Context, audio tts.Audio) ([][]byte, error)
 }
 
+// StreamEncoder is an Encoder that can also turn audio arriving in chunks
+// into Opus frames as soon as each chunk completes them, so playback can start
+// while synthesis is still running.
+type StreamEncoder interface {
+	Encoder
+	// NewStream starts decoding one utterance in format.
+	NewStream(format tts.Format) (FrameStream, error)
+}
+
+// FrameStream converts one utterance's audio, chunk by chunk.
+type FrameStream interface {
+	// Write consumes the next chunk and returns the frames it completed,
+	// possibly none.
+	Write(chunk []byte) ([][]byte, error)
+	// Close reports an error if the audio ended mid-frame or was otherwise
+	// incomplete.
+	Close() error
+}
+
 // Conn is the part of a voice connection the player needs.
 type Conn interface {
 	// Speaking sets the speaking indicator.

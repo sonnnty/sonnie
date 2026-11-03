@@ -12,6 +12,13 @@ import (
 	"github.com/Sonty15/SONNIE/internal/tts"
 )
 
+const oggPageHeaderSize = 27
+
+var (
+	opusHeadMagic = []byte("OpusHead")
+	opusTagsMagic = []byte("OpusTags")
+)
+
 func TestOggOpusEncoder_RealFixture(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("testdata", "sample.ogg"))
 	if err != nil {

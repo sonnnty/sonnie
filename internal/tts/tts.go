@@ -1,5 +1,5 @@
-// Package tts defines the text-to-speech boundary. No real engine is wired
-// in yet: see Unimplemented and the README for candidate engines.
+// Package tts defines the text-to-speech boundary and its Google Cloud
+// Text-to-Speech implementation.
 package tts
 
 import (
@@ -38,10 +38,9 @@ type Synthesizer interface {
 // ErrNotImplemented is returned by Unimplemented.
 var ErrNotImplemented = errors.New("tts: no synthesizer configured")
 
-// Unimplemented is the placeholder Synthesizer used until a real engine is
-// chosen. It always fails with ErrNotImplemented.
-//
-// TODO: replace with a real engine (see README, "Read chat aloud").
+// Unimplemented is the placeholder Synthesizer used when no engine is
+// configured (for example when GOOGLE_TTS_API_KEY is unset). It always fails
+// with ErrNotImplemented.
 type Unimplemented struct{}
 
 func (Unimplemented) Synthesize(context.Context, string, string) (Audio, error) {

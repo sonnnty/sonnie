@@ -18,8 +18,14 @@ type TTSConfig struct {
 	// intent that is not enabled in the Developer Portal stops the bot
 	// from connecting at all.
 	Enabled bool
+	// GoogleAPIKey is the Google Cloud Text-to-Speech API key
+	// (GOOGLE_TTS_API_KEY). When empty, speech synthesis stays stubbed.
+	GoogleAPIKey string
 	// Lang is the language code passed to the synthesizer.
 	Lang string
+	// Voice, if non-empty, overrides the default voice name selected from
+	// Lang (e.g. "th-TH-Chirp3-HD-Achird").
+	Voice string
 	// MaxChars caps how many characters of a single message are spoken.
 	MaxChars int
 	// QueueSize caps how many messages may wait per guild; the oldest
@@ -60,6 +66,8 @@ func loadTTS(getenv func(string) string) (TTSConfig, error) {
 	if v := getenv("TTS_LANG"); v != "" {
 		cfg.Lang = v
 	}
+	cfg.Voice = getenv("TTS_VOICE")
+	cfg.GoogleAPIKey = getenv("GOOGLE_TTS_API_KEY")
 
 	var err error
 	if cfg.Enabled, err = parseBool(getenv, "TTS_ENABLED", false); err != nil {

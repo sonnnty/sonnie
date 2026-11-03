@@ -40,7 +40,7 @@ Commands that need shared state (like `/tts`) still self-register in
 `init()`. They get their dependencies through a small interface and a
 setter that the bot calls once at startup (see `SetTTS` in `tts.go`).
 
-## Read chat aloud (`/tts`) — work in progress
+## Read chat aloud (`/tts`)
 
 `/tts join` makes the bot join your voice channel and read new messages
 from the text channel you ran it in. `/tts leave` stops reading and leaves
@@ -68,21 +68,20 @@ What works now:
   transport encryption. DAVE end-to-end encryption, which Discord requires
   in voice channels since March 2026, comes from dave-go. Both are pure Go,
   so no cgo. discordgo still handles everything else. Frames are paced at
-  20 ms and held until the DAVE handshake is done. This has not been tested
-  against a live voice channel yet. See
+  20 ms and held until the DAVE handshake is done. Joining and the DAVE/MLS
+  handshake have been verified live in Discord. See
   [docs/voice-transport.md](docs/voice-transport.md) for the research, the
   options considered and why disgo and dave-go are pinned to untagged
   commits.
-
-What is stubbed, so **no audio plays yet**:
-
-- Speech synthesis: `tts.Unimplemented` fails every request, so each
-  message logs `tts: no synthesizer configured`.
-- Opus encoding: `voice.UnimplementedEncoder`.
-
-Once both are replaced, audio is expected to reach listeners. The first
-live test should confirm that `/tts join` is not closed with code 4016 or
-4017, and that speech is heard in a normal desktop client.
+- Speech synthesis and Opus encoding: `tts.Google` calls the Google Cloud
+  Text-to-Speech v1 REST API (`OGG_OPUS` at 48 kHz, default voices
+  `th-TH-Neural2-C` for Thai and `en-US-Neural2-F` for English, overridable
+  via `TTS_VOICE`), and `voice.OggOpusEncoder` demuxes the Ogg pages into
+  20 ms Opus frames in pure Go (no cgo, no `ffmpeg`).
+- Audio playback requires `GOOGLE_TTS_API_KEY`. When `TTS_ENABLED=true` but
+  `GOOGLE_TTS_API_KEY` is not set, the bot logs a warning at startup and
+  falls back to the unimplemented stubs so `/ping` and the rest of the bot
+  continue to work.
 
 ### Setup
 
@@ -94,22 +93,44 @@ live test should confirm that `/tts join` is not closed with code 4016 or
    permissions in the voice channels it should join, and **View Channel**
    and **Read Message History** in the text channels it should read. When
    inviting the bot, include the `bot` and `applications.commands` scopes.
-3. Set `TTS_ENABLED=true` in `.env` and restart the bot.
+3. Create a Google Cloud Text-to-Speech API key:
+   - In the [Google Cloud Console](https://console.cloud.google.com/), create
+     or select a GCP project with billing enabled.
+   - Go to **APIs & Services → Library**, search for **Cloud Text-to-Speech API**
+     (`texttospeech.googleapis.com`) and enable it.
+   - Go to **APIs & Services → Credentials**, click **Create credentials → API key**,
+     open the key's settings, and under **API restrictions** select
+     **Restrict key** and restrict it to **Cloud Text-to-Speech API**.
+4. Set `TTS_ENABLED=true` and `GOOGLE_TTS_API_KEY=<your-key>` in `.env` and
+   restart the bot.
 
-| Variable           | Default | Meaning                                              |
-|--------------------|---------|------------------------------------------------------|
-| `TTS_ENABLED`      | `false` | Turns the feature (and the Message Content intent) on |
-| `TTS_LANG`         | `th`    | Language passed to the speech engine                 |
-| `TTS_MAX_CHARS`    | `200`   | Max characters spoken per message                    |
-| `TTS_QUEUE_SIZE`   | `20`    | Max messages waiting per server; oldest is dropped   |
-| `TTS_SPEAK_AUTHOR` | `true`  | Say the author's name before each message            |
+| Variable             | Default | Meaning                                                       |
+|----------------------|---------|---------------------------------------------------------------|
+| `TTS_ENABLED`        | `false` | Turns the feature (and the Message Content intent) on         |
+| `GOOGLE_TTS_API_KEY` | *(empty)* | Google Cloud Text-to-Speech API key (required for audio)    |
+| `TTS_LANG`           | `th`    | Language passed to the speech engine (`th`, `en`, `ja`, ...)  |
+| `TTS_VOICE`          | *(empty)* | Optional Google voice name override (e.g. `th-TH-Chirp3-HD-Achird`) |
+| `TTS_MAX_CHARS`      | `200`   | Max characters spoken per message                             |
+| `TTS_QUEUE_SIZE`     | `20`    | Max messages waiting per server; oldest is dropped            |
+| `TTS_SPEAK_AUTHOR`   | `true`  | Say the author's name before each message                     |
 
 When `TTS_ENABLED` is off, `/tts` is still listed in Discord but replies
 that the feature is not enabled. `/ping` is unaffected either way.
 
-### Host requirements (once finished)
+### Cost
 
-Depending on which speech engine is chosen, the bot will probably need
-`ffmpeg` on the host to convert engine output to 48 kHz Opus. It is not
-needed if the engine can output Ogg/Opus directly. A local engine such as
-Piper or eSpeak NG would also need its binary and voice models installed.
+Google Cloud Text-to-Speech includes a monthly free tier of **1,000,000
+characters per month** for Neural2 (the default) and Chirp 3: HD voices, and
+**4,000,000 characters per month** for Standard and WaveNet voices. Beyond
+the free tier, Neural2 voices cost **$16 per 1 million characters**
+($0.000016 per character; Chirp 3: HD is $30 per 1 million characters, and
+Standard is $4 per 1 million characters). See the
+[Google Cloud Text-to-Speech pricing page](https://cloud.google.com/text-to-speech/pricing)
+for current rates.
+
+### Host requirements
+
+None beyond network access to Discord and `texttospeech.googleapis.com`.
+Google Cloud TTS returns 48 kHz Ogg/Opus directly and SONNIE demuxes it in
+pure Go, so neither cgo nor `ffmpeg` is needed at runtime and the container
+image remains `distroless/static`.

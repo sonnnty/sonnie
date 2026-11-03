@@ -45,17 +45,27 @@ func TestLoad_TTSDefaults(t *testing.T) {
 
 func TestLoad_TTSOverrides(t *testing.T) {
 	cfg, err := Load(envFrom(map[string]string{
-		"DISCORD_BOT_TOKEN": "t",
-		"TTS_ENABLED":       "true",
-		"TTS_LANG":          "en",
-		"TTS_MAX_CHARS":     "80",
-		"TTS_QUEUE_SIZE":    "5",
-		"TTS_SPEAK_AUTHOR":  "false",
+		"DISCORD_BOT_TOKEN":  "t",
+		"TTS_ENABLED":        "true",
+		"GOOGLE_TTS_API_KEY": "gkey",
+		"TTS_LANG":           "en",
+		"TTS_VOICE":          "en-US-Chirp3-HD-Charon",
+		"TTS_MAX_CHARS":      "80",
+		"TTS_QUEUE_SIZE":     "5",
+		"TTS_SPEAK_AUTHOR":   "false",
 	}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := TTSConfig{Enabled: true, Lang: "en", MaxChars: 80, QueueSize: 5, SpeakAuthor: false}
+	want := TTSConfig{
+		Enabled:      true,
+		GoogleAPIKey: "gkey",
+		Lang:         "en",
+		Voice:        "en-US-Chirp3-HD-Charon",
+		MaxChars:     80,
+		QueueSize:    5,
+		SpeakAuthor:  false,
+	}
 	if cfg.TTS != want {
 		t.Fatalf("expected %+v, got %+v", want, cfg.TTS)
 	}

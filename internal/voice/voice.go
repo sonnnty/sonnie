@@ -9,7 +9,10 @@ import (
 	"github.com/Sonty15/SONNIE/internal/tts"
 )
 
-// Discord expects Opus frames of 20 ms at 48 kHz, stereo.
+// Discord negotiates Opus at 48 kHz, 2 channels (RFC 7587), 20 ms per frame.
+// Individual Opus packets self-describe mono vs stereo in their TOC byte
+// (RFC 6716 §3.1), so a receiver's 48 kHz stereo libopus decoder accepts
+// both mono and stereo packets directly.
 const (
 	SampleRate = 48000
 	Channels   = 2
@@ -36,16 +39,8 @@ type Conn interface {
 // ErrEncoderNotImplemented is returned by UnimplementedEncoder.
 var ErrEncoderNotImplemented = errors.New("voice: no audio encoder configured")
 
-// UnimplementedEncoder is the placeholder Encoder.
-//
-// TODO: implement without cgo. Options, cheapest first:
-//   - If the synthesizer returns tts.FormatOggOpus at 48 kHz, demux the Ogg
-//     pages into Opus packets in pure Go; no transcoding needed.
-//   - Otherwise pipe the audio through an ffmpeg subprocess
-//     (-f ogg -c:a libopus -ar 48000 -ac 2 -frame_duration 20) and demux
-//     its Ogg output the same way.
-//   - A pure-Go Opus encoder would remove the ffmpeg dependency, but none
-//     is mature yet; libopus bindings (gopkg.in/hraban/opus.v2) need cgo.
+// UnimplementedEncoder is the placeholder Encoder used when no synthesizer is
+// configured. See OggOpusEncoder for the production Ogg/Opus demuxer.
 type UnimplementedEncoder struct{}
 
 func (UnimplementedEncoder) Encode(context.Context, tts.Audio) ([][]byte, error) {

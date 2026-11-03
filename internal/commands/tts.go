@@ -98,7 +98,10 @@ func handleTTS(s *discordgo.Session, i *discordgo.InteractionCreate) {
 func ttsJoinReply(ctx context.Context, ctl TTSController, guildID, voiceChannelID, textChannelID string) string {
 	if err := ctl.Join(ctx, guildID, voiceChannelID, textChannelID); err != nil {
 		log.Printf("tts: join guild %s channel %s: %v", guildID, voiceChannelID, err)
-		return "I couldn't join your voice channel. Check that I have the Connect and Speak permissions there."
+		if errors.Is(err, context.DeadlineExceeded) {
+			return "Joining your voice channel timed out — the voice connection may have been slow or failed, or I may be missing the Connect and Speak permissions there."
+		}
+		return "I couldn't join your voice channel. Check that I have the Connect and Speak permissions there, or try again if the voice connection failed."
 	}
 	return fmt.Sprintf("Reading <#%s> aloud in <#%s>. Use /tts leave to stop.", textChannelID, voiceChannelID)
 }

@@ -1,6 +1,7 @@
 package events
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -23,11 +24,12 @@ type fakeAPI struct {
 	listErr   error
 	sendErr   error
 
-	created   []*discordgo.GuildScheduledEventParams
-	edits     []editCall
-	sent      []sentMessage
-	responses []*discordgo.InteractionResponse
-	webEdits  []*discordgo.WebhookEdit
+	created    []*discordgo.GuildScheduledEventParams
+	edits      []editCall
+	sent       []sentMessage
+	responses  []*discordgo.InteractionResponse
+	webEdits   []*discordgo.WebhookEdit
+	rawPatches []map[string]any
 }
 
 type editCall struct {
@@ -196,6 +198,40 @@ func (f *fakeAPI) InteractionResponseEdit(_ *discordgo.Interaction, e *discordgo
 	defer f.mu.Unlock()
 	f.webEdits = append(f.webEdits, e)
 	return &discordgo.Message{}, nil
+}
+
+// RequestWithBucketID handles the raw PATCH that clears a description.
+func (f *fakeAPI) RequestWithBucketID(method, urlStr string, data interface{}, _ string, _ ...discordgo.RequestOption) ([]byte, error) {
+	if method != "PATCH" {
+		return nil, fmt.Errorf("unexpected %s %s", method, urlStr)
+	}
+	body, _ := data.(map[string]any)
+	f.mu.Lock()
+	f.rawPatches = append(f.rawPatches, body)
+	var target *discordgo.GuildScheduledEvent
+	for _, ev := range f.events {
+		if discordgo.EndpointGuildScheduledEvent(ev.GuildID, ev.ID) == urlStr {
+			target = ev
+		}
+	}
+	f.mu.Unlock()
+	if target == nil {
+		return nil, errors.New("HTTP 404 Not Found")
+	}
+	raw, _ := json.Marshal(body)
+	var p discordgo.GuildScheduledEventParams
+	json.Unmarshal(raw, &p)
+	ev, err := f.GuildScheduledEventEdit(target.GuildID, target.ID, &p)
+	if err != nil {
+		return nil, err
+	}
+	if v, ok := body["description"]; ok && v == nil {
+		f.mu.Lock()
+		f.events[ev.ID].Description = ""
+		ev.Description = ""
+		f.mu.Unlock()
+	}
+	return json.Marshal(ev)
 }
 
 func (f *fakeAPI) sentCount() int {

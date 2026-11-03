@@ -6,6 +6,7 @@ package events
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -21,6 +22,10 @@ type API interface {
 
 	InteractionRespond(interaction *discordgo.Interaction, resp *discordgo.InteractionResponse, options ...discordgo.RequestOption) error
 	InteractionResponseEdit(interaction *discordgo.Interaction, newresp *discordgo.WebhookEdit, options ...discordgo.RequestOption) (*discordgo.Message, error)
+
+	// RequestWithBucketID is for the one edit discordgo cannot express:
+	// clearing an event's description.
+	RequestWithBucketID(method, urlStr string, data interface{}, bucketID string, options ...discordgo.RequestOption) ([]byte, error)
 }
 
 var _ API = (*discordgo.Session)(nil)
@@ -40,4 +45,13 @@ func CoverURL(ev *discordgo.GuildScheduledEvent) string {
 
 func upcoming(ev *discordgo.GuildScheduledEvent) bool {
 	return ev.Status == discordgo.GuildScheduledEventStatusScheduled || ev.Status == discordgo.GuildScheduledEventStatusActive
+}
+
+func sortByStart(evs []*discordgo.GuildScheduledEvent) {
+	sort.Slice(evs, func(i, j int) bool {
+		if !evs[i].ScheduledStartTime.Equal(evs[j].ScheduledStartTime) {
+			return evs[i].ScheduledStartTime.Before(evs[j].ScheduledStartTime)
+		}
+		return evs[i].ID < evs[j].ID
+	})
 }

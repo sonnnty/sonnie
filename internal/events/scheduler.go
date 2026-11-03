@@ -180,12 +180,7 @@ func (s *Scheduler) Upcoming(guildID string) []*discordgo.GuildScheduledEvent {
 		}
 	}
 	s.mu.Unlock()
-	sort.Slice(out, func(i, j int) bool {
-		if !out[i].ScheduledStartTime.Equal(out[j].ScheduledStartTime) {
-			return out[i].ScheduledStartTime.Before(out[j].ScheduledStartTime)
-		}
-		return out[i].ID < out[j].ID
-	})
+	sortByStart(out)
 	return out
 }
 

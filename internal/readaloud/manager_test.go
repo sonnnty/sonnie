@@ -352,12 +352,12 @@ func TestManager_LogsLimitErrorOncePerMonth(t *testing.T) {
 			t.Fatal("limit error should be handled")
 		}
 	}
-	if n := strings.Count(buf.String(), "monthly character limit"); n != 1 {
+	if n := strings.Count(buf.String(), "limit reached"); n != 1 {
 		t.Fatalf("logged %d times, want 1: %q", n, buf.String())
 	}
 	dec := fmt.Errorf("synthesize: %w", &usage.LimitError{Month: "2026-12", Used: 10, Limit: 10})
 	m.logLimitOnce(dec)
-	if n := strings.Count(buf.String(), "monthly character limit"); n != 2 {
+	if n := strings.Count(buf.String(), "limit reached"); n != 2 {
 		t.Fatalf("expected a new log in the next month, got %d", n)
 	}
 	if m.logLimitOnce(errors.New("other")) {

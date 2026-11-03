@@ -93,7 +93,7 @@ func (m *Manager) logLimitOnce(err error) bool {
 	m.limitLogged = le.Month
 	m.limitMu.Unlock()
 	if first {
-		log.Printf("tts: monthly character limit reached (%d/%d in %s); messages are skipped until next month", le.Used, le.Limit, le.Month)
+		log.Printf("tts: %v; messages are skipped until next month", le)
 	}
 	return true
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -186,5 +187,80 @@ func TestGoogle_RespectsContextTimeout(t *testing.T) {
 	g := &Google{APIKey: "k", Endpoint: srv.URL, Client: srv.Client()}
 	if _, err := g.Synthesize(ctx, "hi", "en"); err == nil {
 		t.Fatal("expected timeout error, got nil")
+	}
+}
+
+// captureBody serves a canned response and records the raw request body.
+func captureBody(t *testing.T) (*httptest.Server, *string) {
+	t.Helper()
+	var body string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		body = string(b)
+		_, _ = w.Write([]byte(`{"audioContent":"T2dnUw=="}`))
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &body
+}
+
+func TestGoogle_GeminiRequestJSON(t *testing.T) {
+	srv, body := captureBody(t)
+	g := &Google{
+		APIKey: "k", Endpoint: srv.URL, Client: srv.Client(),
+		Model: "gemini-2.5-flash-tts", Voice: "Charon", Prompt: "พูดแบบเป็นกันเอง",
+	}
+	if _, err := g.Synthesize(context.Background(), "สวัสดี", "th"); err != nil {
+		t.Fatal(err)
+	}
+	want := `{"input":{"text":"สวัสดี","prompt":"พูดแบบเป็นกันเอง"},` +
+		`"voice":{"languageCode":"th-TH","name":"Charon","modelName":"gemini-2.5-flash-tts"},` +
+		`"audioConfig":{"audioEncoding":"OGG_OPUS","sampleRateHertz":48000}}`
+	if *body != want {
+		t.Fatalf("request JSON\n got: %s\nwant: %s", *body, want)
+	}
+}
+
+func TestGoogle_GeminiDefaultsAndLanguage(t *testing.T) {
+	srv, body := captureBody(t)
+	g := &Google{APIKey: "k", Endpoint: srv.URL, Client: srv.Client(), Model: "gemini-2.5-flash-tts"}
+	if _, err := g.Synthesize(context.Background(), "hello", "en"); err != nil {
+		t.Fatal(err)
+	}
+	want := `{"input":{"text":"hello"},` +
+		`"voice":{"languageCode":"en-US","name":"Charon","modelName":"gemini-2.5-flash-tts"},` +
+		`"audioConfig":{"audioEncoding":"OGG_OPUS","sampleRateHertz":48000}}`
+	if *body != want {
+		t.Fatalf("request JSON\n got: %s\nwant: %s", *body, want)
+	}
+}
+
+func TestGoogle_ChirpNeverGetsPromptOrModelName(t *testing.T) {
+	srv, body := captureBody(t)
+	// A stray prompt must not leak into a non-Gemini request.
+	g := &Google{
+		APIKey: "k", Endpoint: srv.URL, Client: srv.Client(),
+		Voice: "th-TH-Chirp3-HD-Achird", Prompt: "should be ignored",
+	}
+	if _, err := g.Synthesize(context.Background(), "สวัสดี", "th"); err != nil {
+		t.Fatal(err)
+	}
+	want := `{"input":{"text":"สวัสดี"},` +
+		`"voice":{"languageCode":"th-TH","name":"th-TH-Chirp3-HD-Achird"},` +
+		`"audioConfig":{"audioEncoding":"OGG_OPUS","sampleRateHertz":48000}}`
+	if *body != want {
+		t.Fatalf("request JSON\n got: %s\nwant: %s", *body, want)
+	}
+	if strings.Contains(*body, "prompt") || strings.Contains(*body, "modelName") {
+		t.Fatalf("non-Gemini request carries Gemini fields: %s", *body)
+	}
+}
+
+func TestIsGeminiModel(t *testing.T) {
+	for model, want := range map[string]bool{
+		"gemini-2.5-flash-tts": true, " Gemini-2.5-pro-tts ": true, "": false, "chirp3": false,
+	} {
+		if got := IsGeminiModel(model); got != want {
+			t.Errorf("IsGeminiModel(%q) = %v, want %v", model, got, want)
+		}
 	}
 }

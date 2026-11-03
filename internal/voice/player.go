@@ -62,7 +62,21 @@ func NewPlayer(cfg PlayerConfig) *Player {
 // Enqueue adds text to the queue and reports whether the oldest waiting
 // item was dropped to make room.
 func (p *Player) Enqueue(text string) (dropped bool) {
-	return p.queue.Push(text)
+	return p.EnqueueWith(text, nil)
+}
+
+// EnqueueWith is Enqueue with a hook that reports what became of the item.
+// done(true) is called once all of its audio has been sent; done(false) when
+// it will never be spoken: it was dropped from a full queue, or synthesis or
+// playback failed. It is not called when Close discards the item. done runs
+// on the player's goroutine (or the caller's, for a drop), so it must not
+// block. The player knows nothing about where the text came from.
+func (p *Player) EnqueueWith(text string, done func(spoken bool)) (dropped bool) {
+	old, dropped := p.queue.Push(item{text: text, done: done})
+	if dropped && old.done != nil {
+		old.done(false)
+	}
+	return dropped
 }
 
 // Pending returns how many utterances are waiting (not counting the one
@@ -86,17 +100,19 @@ func (p *Player) run(ctx context.Context) {
 		case <-p.queue.ready:
 		}
 		for {
-			text, ok := p.queue.Pop()
+			it, ok := p.queue.Pop()
 			if !ok {
 				break
 			}
-			if err := p.speak(ctx, text); err != nil {
-				if ctx.Err() != nil {
-					return
-				}
-				if p.cfg.OnError != nil {
-					p.cfg.OnError(err)
-				}
+			err := p.speak(ctx, it.text)
+			if err != nil && ctx.Err() != nil {
+				return
+			}
+			if err != nil && p.cfg.OnError != nil {
+				p.cfg.OnError(err)
+			}
+			if it.done != nil {
+				it.done(err == nil)
 			}
 		}
 	}

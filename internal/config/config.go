@@ -14,7 +14,31 @@ import (
 type Config struct {
 	DiscordToken string
 	TTS          TTSConfig
+	Events       EventsConfig
 }
+
+// EventsConfig holds the settings for /event (Discord Scheduled Events).
+// The feature is always on; it needs no privileged intent.
+type EventsConfig struct {
+	// ChannelID receives the reminders: EVENT_CHANNEL_ID, else the TTS
+	// alert channel (TTS_ALERT_CHANNEL_ID). Empty means no reminders.
+	ChannelID string
+	// RemindBefore (EVENT_REMIND_BEFORE) is how long before the start the
+	// interested users are reminded. 0 turns reminders off.
+	RemindBefore time.Duration
+	// AutoStart (EVENT_AUTO_START) also starts and ends events the bot did
+	// not create. Events created with /event are always started.
+	AutoStart bool
+	// PexelsKey (PEXELS_API_KEY) and UnsplashKey (UNSPLASH_ACCESS_KEY) add
+	// those image libraries in front of Openverse, which needs no key.
+	PexelsKey   string
+	UnsplashKey string
+	// GoogleCredentialsFile (GOOGLE_APPLICATION_CREDENTIALS) is the service
+	// account used to ask Gemini for English search keywords.
+	GoogleCredentialsFile string
+}
+
+const defaultEventRemindBefore = 15 * time.Minute
 
 // TTSConfig holds the optional settings for the read-chat-aloud feature.
 type TTSConfig struct {
@@ -97,7 +121,37 @@ func Load(getenv func(string) string) (Config, error) {
 		return Config{}, err
 	}
 
-	return Config{DiscordToken: token, TTS: tts}, nil
+	events, err := loadEvents(getenv, tts.AlertChannelID)
+	if err != nil {
+		return Config{}, err
+	}
+
+	return Config{DiscordToken: token, TTS: tts, Events: events}, nil
+}
+
+func loadEvents(getenv func(string) string, alertChannelID string) (EventsConfig, error) {
+	cfg := EventsConfig{
+		ChannelID:             alertChannelID,
+		RemindBefore:          defaultEventRemindBefore,
+		AutoStart:             true,
+		PexelsKey:             strings.TrimSpace(getenv("PEXELS_API_KEY")),
+		UnsplashKey:           strings.TrimSpace(getenv("UNSPLASH_ACCESS_KEY")),
+		GoogleCredentialsFile: strings.TrimSpace(getenv("GOOGLE_APPLICATION_CREDENTIALS")),
+	}
+	if id := strings.TrimSpace(getenv("EVENT_CHANNEL_ID")); id != "" {
+		if !isSnowflake(id) {
+			return EventsConfig{}, fmt.Errorf("EVENT_CHANNEL_ID: %q is not a Discord channel ID", id)
+		}
+		cfg.ChannelID = id
+	}
+	var err error
+	if cfg.RemindBefore, err = parseNonNegativeDuration(getenv, "EVENT_REMIND_BEFORE", cfg.RemindBefore); err != nil {
+		return EventsConfig{}, err
+	}
+	if cfg.AutoStart, err = parseBool(getenv, "EVENT_AUTO_START", cfg.AutoStart); err != nil {
+		return EventsConfig{}, err
+	}
+	return cfg, nil
 }
 
 func loadTTS(getenv func(string) string) (TTSConfig, error) {

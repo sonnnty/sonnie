@@ -187,3 +187,70 @@ func TestLoad_TTSDeleteAfterZeroTurnsItOff(t *testing.T) {
 		}
 	}
 }
+
+func TestLoad_EventDefaults(t *testing.T) {
+	cfg, err := Load(envFrom(map[string]string{"DISCORD_BOT_TOKEN": "t"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := EventsConfig{RemindBefore: 15 * time.Minute, AutoStart: true}
+	if cfg.Events != want {
+		t.Fatalf("expected %+v, got %+v", want, cfg.Events)
+	}
+}
+
+func TestLoad_EventOverrides(t *testing.T) {
+	cfg, err := Load(envFrom(map[string]string{
+		"DISCORD_BOT_TOKEN":              "t",
+		"TTS_ALERT_CHANNEL_ID":           "111",
+		"EVENT_CHANNEL_ID":               "222",
+		"EVENT_REMIND_BEFORE":            "30m",
+		"EVENT_AUTO_START":               "false",
+		"PEXELS_API_KEY":                 " pk ",
+		"UNSPLASH_ACCESS_KEY":            "uk",
+		"GOOGLE_APPLICATION_CREDENTIALS": "/secrets/sa.json",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := EventsConfig{ChannelID: "222", RemindBefore: 30 * time.Minute, AutoStart: false,
+		PexelsKey: "pk", UnsplashKey: "uk", GoogleCredentialsFile: "/secrets/sa.json"}
+	if cfg.Events != want {
+		t.Fatalf("expected %+v, got %+v", want, cfg.Events)
+	}
+}
+
+func TestLoad_EventChannelFallsBackToAlertChannel(t *testing.T) {
+	cfg, err := Load(envFrom(map[string]string{"DISCORD_BOT_TOKEN": "t", "TTS_ALERT_CHANNEL_ID": "111"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Events.ChannelID != "111" {
+		t.Fatalf("ChannelID = %q, want the alert channel", cfg.Events.ChannelID)
+	}
+}
+
+func TestLoad_EventRemindZeroTurnsItOff(t *testing.T) {
+	cfg, err := Load(envFrom(map[string]string{"DISCORD_BOT_TOKEN": "t", "EVENT_REMIND_BEFORE": "0"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Events.RemindBefore != 0 {
+		t.Fatalf("RemindBefore = %s", cfg.Events.RemindBefore)
+	}
+}
+
+func TestLoad_EventInvalidValues(t *testing.T) {
+	for key, value := range map[string]string{
+		"EVENT_CHANNEL_ID":    "#events",
+		"EVENT_REMIND_BEFORE": "15",
+		"EVENT_AUTO_START":    "maybe",
+	} {
+		if _, err := Load(envFrom(map[string]string{"DISCORD_BOT_TOKEN": "t", key: value})); err == nil {
+			t.Errorf("%s=%q: expected an error", key, value)
+		}
+	}
+	if _, err := Load(envFrom(map[string]string{"DISCORD_BOT_TOKEN": "t", "EVENT_REMIND_BEFORE": "-5m"})); err == nil {
+		t.Error("negative EVENT_REMIND_BEFORE: expected an error")
+	}
+}

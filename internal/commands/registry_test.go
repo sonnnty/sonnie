@@ -13,3 +13,20 @@ func TestFind_ReturnsFalseForUnknownCommand(t *testing.T) {
 		t.Fatal("expected unknown command to not be found")
 	}
 }
+
+func TestFindComponent_RoutesEventButtons(t *testing.T) {
+	c, ok := FindComponent("event:cancel:123")
+	if !ok || c.Definition.Name != "event" {
+		t.Fatalf("event button routed to %v, %v", c.Definition, ok)
+	}
+	if _, ok := FindComponent("other:1"); ok {
+		t.Fatal("unknown button was routed")
+	}
+}
+
+func TestEvent_IsRegisteredWithAutocomplete(t *testing.T) {
+	c, ok := Find("event")
+	if !ok || c.Autocomplete == nil || c.Component == nil {
+		t.Fatal("/event is not registered with autocomplete and buttons")
+	}
+}

@@ -115,6 +115,9 @@ type session struct {
 	participants []string             // in the session now, in join order
 	left         []string             // joined, then left
 	tracked      map[string]time.Time // participants' messages seen live
+	// joinedAt is when each user first joined; only their messages from
+	// then on are deleted, so chat from before they opted in stays.
+	joinedAt map[string]time.Time
 }
 
 func (s *session) isParticipant(userID string) bool {
@@ -274,6 +277,9 @@ func (m *Manager) addParticipant(s *session, req JoinRequest) (JoinResult, error
 	}
 	s.left = slices.DeleteFunc(s.left, func(id string) bool { return id == req.UserID })
 	s.participants = append(s.participants, req.UserID)
+	if _, ok := s.joinedAt[req.UserID]; !ok {
+		s.joinedAt[req.UserID] = m.cfg.Now()
+	}
 	n := len(s.participants)
 	view := s.view()
 	m.mu.Unlock()
@@ -300,6 +306,7 @@ func (m *Manager) start(ctx context.Context, req JoinRequest) (JoinResult, error
 		manage:         manage,
 		participants:   []string{req.UserID},
 		tracked:        make(map[string]time.Time),
+		joinedAt:       make(map[string]time.Time),
 	}
 	// The first render needs a start time before Discord has reported one.
 	s.started = m.cfg.Now()
@@ -492,6 +499,7 @@ type endedSession struct {
 	view      sessionView
 	everyone  []string
 	tracked   map[string]time.Time
+	joinedAt  map[string]time.Time // missing users count from the session start
 	ended     time.Time
 	reason    string
 }
@@ -523,6 +531,7 @@ func (m *Manager) detach(s *session, reason string, disconnect bool) error {
 		view:      s.view(),
 		everyone:  s.everyone(),
 		tracked:   maps.Clone(s.tracked),
+		joinedAt:  maps.Clone(s.joinedAt),
 		ended:     m.cfg.Now(),
 		reason:    reason,
 	}
@@ -553,9 +562,9 @@ func (m *Manager) finish(ctx context.Context, e endedSession) {
 	if !e.view.Manage || !msgr.CanManageMessages(e.view.TextChannelID) {
 		res.NoPermission = true
 	} else {
-		set := make(map[string]bool, len(e.everyone))
+		set := make(map[string]time.Time, len(e.everyone))
 		for _, id := range e.everyone {
-			set[id] = true
+			set[id] = e.joinedAt[id] // zero: from the session start
 		}
 		res = cleanupMessages(ctx, msgr, cleanupJob{
 			ChannelID:        e.view.TextChannelID,
@@ -667,9 +676,11 @@ func (m *Manager) RecoverGuild(ctx context.Context, guildID string) {
 			continue
 		}
 
-		started := o.Marker.Started
+		// Discord's creation time of the session message, not the host
+		// clock in the marker, so clock skew cannot skip early messages.
+		started := o.Time
 		if started.IsZero() {
-			started = o.Time
+			started = o.Marker.Started
 		}
 		log.Printf("tts: recovering unfinished session guild=%s text=%s message=%s users=%s",
 			guildID, o.ChannelID, o.MessageID, strings.Join(o.Marker.All(), ","))

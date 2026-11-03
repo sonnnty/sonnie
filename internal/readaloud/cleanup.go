@@ -33,8 +33,11 @@ type cleanupJob struct {
 	// Started is when the session message was created, Ended when the session
 	// ended. Only messages in between are deleted.
 	Started, Ended time.Time
-	// Participants is everyone who was in the session at any time.
-	Participants map[string]bool
+	// Participants is everyone who was in the session at any time, with when
+	// they first joined. Only their messages from that time on are deleted;
+	// a zero time means from the session start (used after a restart, when
+	// join times are not known).
+	Participants map[string]time.Time
 	// Tracked are the participant messages seen live (ID to creation time).
 	// They are the fallback when the history scan fails.
 	Tracked map[string]time.Time
@@ -46,7 +49,8 @@ type candidate struct {
 }
 
 // cleanupMessages deletes the messages participants posted in the session's
-// text channel between the session message and the end of the session. The
+// text channel between their first join (or the session message) and the end
+// of the session. The
 // history scan is authoritative: it sees messages the bot missed (a restart,
 // a dropped event) and leaves out ones people already deleted themselves. If
 // the scan fails or is incomplete, the live-tracked IDs are added so nothing
@@ -67,7 +71,7 @@ func cleanupMessages(ctx context.Context, msgr Messenger, job cleanupJob, now ti
 
 	scanned, err := msgr.MessagesAfter(ctx, job.ChannelID, job.SessionMessageID)
 	for _, m := range scanned {
-		if job.Participants[m.AuthorID] {
+		if joined, ok := job.Participants[m.AuthorID]; ok && !m.Time.Before(joined) {
 			add(m.ID, m.Time)
 		}
 	}

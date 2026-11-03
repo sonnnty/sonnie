@@ -27,9 +27,9 @@ func newCleanupFixture(participants ...string) *cleanupFixture {
 	f := newFakeMessenger()
 	f.channels["t1"] = nil
 	session := f.add("t1", "bot", cleanStart)
-	set := make(map[string]bool)
+	set := make(map[string]time.Time)
 	for _, p := range participants {
-		set[p] = true
+		set[p] = time.Time{} // from the session start
 	}
 	return &cleanupFixture{f: f, session: session, job: cleanupJob{
 		ChannelID:        "t1",
@@ -294,5 +294,28 @@ func TestMentions_CapsLongLists(t *testing.T) {
 	got := mentions(ids, " ")
 	if want := " และอีก 3 คน"; got[len(got)-len(want):] != want {
 		t.Fatalf("got %q", got)
+	}
+}
+
+// A user's chat from before they ran /tts join stays; only what they wrote
+// after opting in is deleted.
+func TestCleanup_KeepsMessagesFromBeforeTheUserJoined(t *testing.T) {
+	c := newCleanupFixture("a")
+	joined := cleanStart.Add(10 * time.Minute)
+	c.job.Participants["b"] = joined
+
+	early := c.f.add("t1", "b", joined.Add(-time.Minute))
+	late := c.f.add("t1", "b", joined.Add(time.Minute))
+	fromA := c.f.add("t1", "a", cleanStart.Add(time.Minute))
+
+	res := c.run()
+	if res.Deleted != 2 {
+		t.Fatalf("deleted %d, want 2: %+v", res.Deleted, res)
+	}
+	if c.f.isDeleted(early) {
+		t.Error("message from before b joined was deleted")
+	}
+	if !c.f.isDeleted(late) || !c.f.isDeleted(fromA) {
+		t.Error("participant messages after joining were kept")
 	}
 }

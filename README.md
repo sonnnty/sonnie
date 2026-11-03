@@ -83,9 +83,11 @@ Refusals are private and say what to do instead:
 
 What gets deleted at the end, exactly: messages in the session's text channel
 by **anyone who took part at any time** (including people who joined and later
-left), created **after the session message and before the session ended**.
-Never touched: messages by people who did not join, messages in other
-channels, anything from before the session, and the bot's own session message.
+left), created **after that person first ran `/tts join` and before the session
+ended**. Never touched: messages by people who did not join, what a participant
+wrote before they joined, messages in other channels, anything from before the
+session, and the bot's own session message. After a restart the join times are
+not known, so a recovered session cleans from the session message on.
 Messages younger than 14 days go through Discord's bulk delete (chunks of at
 most 100); older ones are deleted one by one. The bot also remembers the
 participants' messages as they arrive, and scans the channel history after the

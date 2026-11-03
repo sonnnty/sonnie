@@ -1,6 +1,8 @@
 package bot
 
 import (
+	"log"
+
 	"github.com/bwmarrin/discordgo"
 
 	"github.com/Sonty15/SONNIE/internal/config"
@@ -10,11 +12,10 @@ import (
 )
 
 func newReadAloud(s *discordgo.Session, cfg config.TTSConfig) *readaloud.Manager {
+	synth, encoder := newSpeechPipeline(cfg)
 	return readaloud.New(readaloud.Config{
-		// TODO: replace both stubs; until then /tts join connects but
-		// every message fails with "no synthesizer configured".
-		Synth:   tts.Unimplemented{},
-		Encoder: voice.UnimplementedEncoder{},
+		Synth:   synth,
+		Encoder: encoder,
 		// Registers its own voice event handlers on s.
 		Joiner:   voice.NewDAVEJoiner(s),
 		Presence: statePresence{s: s},
@@ -24,6 +25,17 @@ func newReadAloud(s *discordgo.Session, cfg config.TTSConfig) *readaloud.Manager
 		QueueSize:   cfg.QueueSize,
 		SpeakAuthor: cfg.SpeakAuthor,
 	})
+}
+
+func newSpeechPipeline(cfg config.TTSConfig) (tts.Synthesizer, voice.Encoder) {
+	if cfg.GoogleAPIKey == "" {
+		log.Println("tts: GOOGLE_TTS_API_KEY is not set; /tts join will connect to voice, but speech synthesis is disabled")
+		return tts.Unimplemented{}, voice.UnimplementedEncoder{}
+	}
+	return &tts.Google{
+		APIKey: cfg.GoogleAPIKey,
+		Voice:  cfg.Voice,
+	}, voice.OggOpusEncoder{}
 }
 
 func (b *Bot) handleMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {

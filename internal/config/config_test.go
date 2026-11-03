@@ -70,6 +70,8 @@ func TestLoad_TTSOverrides(t *testing.T) {
 		SpeakAuthor:  false,
 
 		MonthlyCharLimit: 500000,
+		MonthlyBudgetTHB: 300,
+		USDToTHB:         33,
 		AlertChannelID:   "123456789012345678",
 	}
 	if cfg.TTS != want {

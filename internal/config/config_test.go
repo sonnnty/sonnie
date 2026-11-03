@@ -85,6 +85,7 @@ func TestLoad_TTSInvalidValues(t *testing.T) {
 	}{
 		{"TTS_ENABLED", "maybe"},
 		{"TTS_SPEAK_AUTHOR", "yes please"},
+		{"TTS_STREAMING", "sometimes"},
 		{"TTS_MAX_CHARS", "abc"},
 		{"TTS_MAX_CHARS", "0"},
 		{"TTS_QUEUE_SIZE", "-3"},
@@ -128,6 +129,27 @@ func TestLoad_GeminiSettings(t *testing.T) {
 	if got.Model != "gemini-2.5-flash-tts" || got.Voice != "Charon" || got.Prompt != "พูดแบบเป็นกันเอง" ||
 		got.MonthlyBudgetTHB != 250.5 || got.USDToTHB != 34.25 {
 		t.Fatalf("unexpected gemini settings: %+v", got)
+	}
+}
+
+func TestLoad_StreamingDefaultsToGeminiModel(t *testing.T) {
+	for _, tt := range []struct {
+		model, streaming string
+		want             bool
+	}{
+		{"gemini-2.5-flash-tts", "", true},
+		{"gemini-2.5-flash-tts", "false", false},
+		{"", "", false},
+		// Accepted, but the bot ignores it for non-Gemini voices.
+		{"", "true", true},
+	} {
+		cfg, err := Load(envFrom(map[string]string{"DISCORD_BOT_TOKEN": "t", "TTS_MODEL": tt.model, "TTS_STREAMING": tt.streaming}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.TTS.Streaming != tt.want {
+			t.Errorf("TTS_MODEL=%q TTS_STREAMING=%q: Streaming = %v, want %v", tt.model, tt.streaming, cfg.TTS.Streaming, tt.want)
+		}
 	}
 }
 

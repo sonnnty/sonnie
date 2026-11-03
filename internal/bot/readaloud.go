@@ -18,7 +18,8 @@ import (
 func newReadAloud(s *discordgo.Session, cfg config.TTSConfig) (*readaloud.Manager, *usage.Meter) {
 	synth, encoder := newSpeechPipeline(cfg)
 	var meter *usage.Meter
-	if _, ok := synth.(*tts.Google); ok {
+	switch synth.(type) {
+	case *tts.Google, *tts.GoogleStream:
 		meter = newMeter(s, cfg, synth)
 		synth = meter
 	}
@@ -59,16 +60,33 @@ func newSpeechPipeline(cfg config.TTSConfig) (tts.Synthesizer, voice.Encoder) {
 		Model:  cfg.Model,
 		Prompt: cfg.Prompt,
 	}
+	streaming := cfg.Streaming && tts.IsGeminiModel(cfg.Model)
 	switch {
 	case cfg.GoogleCredentialsFile != "":
-		client, err := tts.NewGoogleOAuthClient(context.Background(), cfg.GoogleCredentialsFile)
+		ctx := context.Background()
+		creds, err := tts.LoadGoogleCredentials(ctx, cfg.GoogleCredentialsFile)
 		if err != nil {
 			log.Printf("%v; speech synthesis is disabled", err)
 			return tts.Unimplemented{}, voice.UnimplementedEncoder{}
 		}
-		g.Client = client
+		g.Client = tts.NewGoogleOAuthClientFromCredentials(ctx, creds)
+		if !streaming {
+			break
+		}
+		// The gRPC connection lives as long as the process, like the
+		// REST client; nothing closes it before exit.
+		open, _, err := tts.NewGoogleStreamOpener(ctx, creds)
+		if err != nil {
+			log.Printf("%v; using the REST API instead of streaming", err)
+			break
+		}
+		log.Printf("tts: streaming %s over gRPC (TTS_STREAMING); the REST API is the fallback", g.Model)
+		return &tts.GoogleStream{REST: g, Open: open}, voice.OggOpusEncoder{}
 	case cfg.GoogleAPIKey != "":
 		g.APIKey = cfg.GoogleAPIKey
+		if streaming {
+			log.Println("tts: TTS_STREAMING needs GOOGLE_APPLICATION_CREDENTIALS (a service account); using the REST API with the API key")
+		}
 	default:
 		log.Println("tts: neither GOOGLE_APPLICATION_CREDENTIALS nor GOOGLE_TTS_API_KEY is set; /tts join will connect to voice, but speech synthesis is disabled")
 		return tts.Unimplemented{}, voice.UnimplementedEncoder{}

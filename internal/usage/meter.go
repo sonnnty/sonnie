@@ -1,0 +1,402 @@
+// Package usage meters the characters sent to Google Cloud Text-to-Speech,
+// enforces a monthly cap, raises threshold alerts and persists the counter.
+//
+// The deployment has no persistent volume, so the counter is kept in Discord:
+// one status message in the alert channel holds a machine-readable marker
+// (see FormatMarker) that the Meter restores on startup and edits as usage
+// grows. Discord itself is behind the Channel interface.
+package usage
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log"
+	"sync"
+	"time"
+	_ "time/tzdata" // the distroless image has no zoneinfo
+
+	"github.com/Sonty15/SONNIE/internal/tts"
+)
+
+const (
+	// billingZone is Google Cloud's billing time zone.
+	billingZone = "America/Los_Angeles"
+
+	// DefaultFlushInterval is how often a changed counter is written back.
+	DefaultFlushInterval = time.Minute
+
+	channelTimeout = 15 * time.Second
+)
+
+// Thresholds are the usage percentages that trigger an alert, once each per
+// month.
+var Thresholds = []int{50, 80, 100}
+
+// ErrLimitReached matches every *LimitError with errors.Is.
+var ErrLimitReached = errors.New("usage: monthly TTS character limit reached")
+
+// LimitError is returned by Meter.Synthesize when the request would exceed
+// the monthly limit. The text is not sent to Google.
+type LimitError struct {
+	Month string
+	Used  int64
+	Limit int64
+}
+
+func (e *LimitError) Error() string {
+	return fmt.Sprintf("usage: monthly TTS character limit reached (%d/%d chars in %s)", e.Used, e.Limit, e.Month)
+}
+
+func (e *LimitError) Is(target error) bool { return target == ErrLimitReached }
+
+// Channel is the Discord side of the meter: the alert channel.
+type Channel interface {
+	// FindStatus returns the content of the newest status message the bot
+	// wrote in the channel, or "" if there is none.
+	FindStatus(ctx context.Context) (string, error)
+	// SaveStatus creates the status message, or edits it if it exists.
+	SaveStatus(ctx context.Context, content string) error
+	// Alert posts a new message in the channel.
+	Alert(ctx context.Context, content string) error
+}
+
+// Config configures a Meter.
+type Config struct {
+	// Inner is the real synthesizer.
+	Inner tts.Synthesizer
+	// Limit is the monthly character cap; 0 means no cap.
+	Limit int64
+	// Channel persists the counter and receives alerts. If nil the meter
+	// is in-memory only.
+	Channel Channel
+	// FlushInterval defaults to DefaultFlushInterval.
+	FlushInterval time.Duration
+	// Now defaults to time.Now.
+	Now func() time.Time
+}
+
+// Snapshot is a point-in-time view of the meter.
+type Snapshot struct {
+	Month   string
+	Used    int64
+	Limit   int64 // 0 means no cap
+	Percent int   // 0 when there is no cap, otherwise rounded down and at most 100
+	Paused  bool  // the cap is reached and reading is paused until next month
+}
+
+// Meter wraps a tts.Synthesizer, counting every character handed to it. It is
+// safe for concurrent use.
+type Meter struct {
+	cfg Config
+	loc *time.Location
+
+	mu       sync.Mutex
+	month    string
+	used     int64
+	alerted  map[int]bool
+	refused  bool   // a request was refused this month
+	version  uint64 // bumped on every change worth persisting
+	saved    uint64 // version last written to the channel
+	closed   bool
+	stopFlag chan struct{}
+
+	flushMu sync.Mutex
+	wg      sync.WaitGroup // the flush loop
+	alertWG sync.WaitGroup // the alert worker
+
+	alertQ       []alert // guarded by mu
+	alertRunning bool    // guarded by mu
+}
+
+// New creates a Meter. Call Start to restore the persisted count and begin
+// periodic saves.
+func New(cfg Config) *Meter {
+	if cfg.Now == nil {
+		cfg.Now = time.Now
+	}
+	if cfg.FlushInterval <= 0 {
+		cfg.FlushInterval = DefaultFlushInterval
+	}
+	loc, err := time.LoadLocation(billingZone)
+	if err != nil {
+		// Unreachable with time/tzdata embedded; fall back to PST.
+		loc = time.FixedZone("PST", -8*60*60)
+	}
+	m := &Meter{cfg: cfg, loc: loc, alerted: map[int]bool{}, stopFlag: make(chan struct{})}
+	m.month = m.currentMonth()
+	return m
+}
+
+func (m *Meter) currentMonth() string {
+	return m.cfg.Now().In(m.loc).Format("2006-01")
+}
+
+// Start restores the persisted counter (if the meter has a Channel) and starts
+// the background saver. A failed restore is logged and the meter starts from
+// zero rather than leaving the bot unable to run.
+func (m *Meter) Start(ctx context.Context) {
+	if m.cfg.Channel == nil {
+		log.Println("usage: TTS_ALERT_CHANNEL_ID is not set; the monthly TTS usage count is kept in memory only and resets when the bot restarts")
+		return
+	}
+
+	content, err := m.cfg.Channel.FindStatus(ctx)
+	switch {
+	case err != nil:
+		log.Printf("usage: could not restore the usage count from the alert channel (starting from 0): %v", err)
+	case content == "":
+		log.Println("usage: no usage status message found in the alert channel; starting from 0")
+	default:
+		if st, ok := ParseMarker(content); ok {
+			m.restore(st)
+		} else {
+			log.Println("usage: status message has no valid marker; starting from 0")
+		}
+	}
+
+	m.wg.Add(1)
+	go m.flushLoop()
+}
+
+func (m *Meter) restore(st State) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.rolloverLocked()
+	if st.Month != m.month {
+		log.Printf("usage: stored count is for %s, current month is %s; starting from 0", st.Month, m.month)
+		return
+	}
+	m.used = st.Chars
+	m.alerted = map[int]bool{}
+	for _, a := range st.Alerted {
+		m.alerted[a] = true
+	}
+	// The restored state is already what is stored; nothing to flush.
+	m.saved = m.version
+	log.Printf("usage: restored %d characters used in %s", m.used, m.month)
+}
+
+// rolloverLocked resets the counter when the billing month has changed.
+func (m *Meter) rolloverLocked() {
+	if cur := m.currentMonth(); cur != m.month {
+		m.month = cur
+		m.used = 0
+		m.alerted = map[int]bool{}
+		m.refused = false
+		m.version++
+	}
+}
+
+// Synthesize implements tts.Synthesizer. It counts the runes of text before
+// calling the inner synthesizer, because a failed request may still be billed,
+// and refuses with a *LimitError when the count would exceed the limit.
+func (m *Meter) Synthesize(ctx context.Context, text, lang string) (tts.Audio, error) {
+	if err := ctx.Err(); err != nil {
+		return tts.Audio{}, err
+	}
+	n := int64(runeCount(text))
+
+	m.mu.Lock()
+	m.rolloverLocked()
+	if m.cfg.Limit > 0 && m.used+n > m.cfg.Limit {
+		limitErr := &LimitError{Month: m.month, Used: m.used, Limit: m.cfg.Limit}
+		m.refused = true
+		// Usage may never reach exactly 100% (the next message just does
+		// not fit), so the refusal itself counts as crossing it.
+		alerts := m.claimAlertsLocked(100)
+		m.mu.Unlock()
+		m.sendAlerts(alerts)
+		return tts.Audio{}, limitErr
+	}
+	m.used += n
+	m.version++
+	alerts := m.claimAlertsLocked(m.percentLocked())
+	m.mu.Unlock()
+
+	m.sendAlerts(alerts)
+	return m.cfg.Inner.Synthesize(ctx, text, lang)
+}
+
+func (m *Meter) percentLocked() int {
+	if m.cfg.Limit <= 0 {
+		return 0
+	}
+	if m.used >= m.cfg.Limit {
+		return 100
+	}
+	return int(m.used * 100 / m.cfg.Limit)
+}
+
+// alert is one threshold announcement.
+type alert struct {
+	threshold int
+	text      string
+}
+
+// claimAlertsLocked marks every not-yet-announced threshold <= percent as
+// alerted and returns the messages to post, so each fires once per month.
+func (m *Meter) claimAlertsLocked(percent int) []alert {
+	if m.cfg.Limit <= 0 {
+		return nil
+	}
+	var msgs []alert
+	for _, th := range Thresholds {
+		if th > percent || m.alerted[th] {
+			continue
+		}
+		m.alerted[th] = true
+		m.version++
+		msgs = append(msgs, alert{th, alertText(th, m.used, m.cfg.Limit)})
+	}
+	return msgs
+}
+
+func alertText(threshold int, used, limit int64) string {
+	counts := fmt.Sprintf("(%s / %s ตัวอักษร)", formatInt(used), formatInt(limit))
+	if threshold >= 100 {
+		return fmt.Sprintf("🛑 Google TTS ใช้ครบโควตาเดือนนี้แล้ว %s — หยุดอ่านออกเสียงจนกว่าจะถึงเดือนหน้า", counts)
+	}
+	return fmt.Sprintf("⚠️ Google TTS ใช้ไป %d%% ของโควตาเดือนนี้ %s", threshold, counts)
+}
+
+// sendAlerts queues alerts for a background worker so a slow Discord call
+// never delays speech and alerts are posted in the order they were raised. A
+// failed alert is un-marked so the next request retries it.
+func (m *Meter) sendAlerts(msgs []alert) {
+	if len(msgs) == 0 || m.cfg.Channel == nil {
+		return
+	}
+	m.mu.Lock()
+	m.alertQ = append(m.alertQ, msgs...)
+	start := !m.alertRunning
+	m.alertRunning = true
+	m.mu.Unlock()
+	if start {
+		m.alertWG.Add(1)
+		go m.alertWorker()
+	}
+}
+
+func (m *Meter) alertWorker() {
+	defer m.alertWG.Done()
+	for {
+		m.mu.Lock()
+		if len(m.alertQ) == 0 {
+			m.alertRunning = false
+			m.mu.Unlock()
+			return
+		}
+		msg := m.alertQ[0]
+		m.alertQ = m.alertQ[1:]
+		m.mu.Unlock()
+
+		ctx, cancel := context.WithTimeout(context.Background(), channelTimeout)
+		err := m.cfg.Channel.Alert(ctx, msg.text)
+		cancel()
+		if err != nil {
+			log.Printf("usage: failed to post %d%% alert (will retry on next request): %v", msg.threshold, err)
+			m.mu.Lock()
+			delete(m.alerted, msg.threshold)
+			m.version++
+			m.mu.Unlock()
+		}
+	}
+}
+
+// Snapshot returns the current month's usage.
+func (m *Meter) Snapshot() Snapshot {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.rolloverLocked()
+	return Snapshot{
+		Month:   m.month,
+		Used:    m.used,
+		Limit:   m.cfg.Limit,
+		Percent: m.percentLocked(),
+		Paused:  m.cfg.Limit > 0 && (m.refused || m.used >= m.cfg.Limit),
+	}
+}
+
+// pendingSave returns the state to persist, or false if it is already saved.
+func (m *Meter) pendingSave() (State, uint64, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.rolloverLocked()
+	if m.version == m.saved {
+		return State{}, 0, false
+	}
+	st := State{Month: m.month, Chars: m.used}
+	for _, th := range Thresholds {
+		if m.alerted[th] {
+			st.Alerted = append(st.Alerted, th)
+		}
+	}
+	return st, m.version, true
+}
+
+func (m *Meter) flushLoop() {
+	defer m.wg.Done()
+	t := time.NewTicker(m.cfg.FlushInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-t.C:
+			m.Flush(context.Background())
+		case <-m.stopFlag:
+			return
+		}
+	}
+}
+
+// Flush writes the counter to the alert channel if it changed since the last
+// write.
+func (m *Meter) Flush(ctx context.Context) {
+	if m.cfg.Channel == nil {
+		return
+	}
+	m.flushMu.Lock()
+	defer m.flushMu.Unlock()
+
+	st, version, dirty := m.pendingSave()
+	if !dirty {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, channelTimeout)
+	defer cancel()
+	if err := m.cfg.Channel.SaveStatus(ctx, FormatStatus(st, m.cfg.Limit)); err != nil {
+		log.Printf("usage: failed to save usage status: %v", err)
+		return
+	}
+	m.mu.Lock()
+	m.saved = version
+	m.mu.Unlock()
+}
+
+// Close stops the background saver, writes the final count and waits for
+// pending alerts.
+func (m *Meter) Close() {
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return
+	}
+	m.closed = true
+	m.mu.Unlock()
+
+	close(m.stopFlag)
+	m.wg.Wait()
+	m.alertWG.Wait()
+	m.Flush(context.Background())
+}
+
+// FormatStatus renders the full status message: a short Thai summary and the
+// marker line in a code block.
+func FormatStatus(st State, limit int64) string {
+	summary := fmt.Sprintf("📊 Google TTS เดือน %s — ใช้ไป %s ตัวอักษร", st.Month, formatInt(st.Chars))
+	if limit > 0 {
+		summary = fmt.Sprintf("📊 Google TTS เดือน %s — ใช้ไป %s / %s ตัวอักษร", st.Month, formatInt(st.Chars), formatInt(limit))
+	}
+	return summary + "\n```\n" + FormatMarker(st) + "\n```"
+}

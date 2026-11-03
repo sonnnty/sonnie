@@ -112,7 +112,7 @@ func handleTTS(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	case "leave":
 		ttsRespond(s, i, ttsLeaveReply(ctl, i.GuildID))
 	case "usage":
-		ttsRespondEphemeral(s, i, ttsUsageReply(usageReporter))
+		ttsRespondData(s, i, ttsUsageResponse(usageReporter, time.Now()))
 	}
 }
 
@@ -184,20 +184,37 @@ func formatCount(n int64) string {
 	return s
 }
 
-func ttsRespondEphemeral(s *discordgo.Session, i *discordgo.InteractionCreate, content string) {
+func ttsUsageResponse(u UsageReporter, now time.Time) *discordgo.InteractionResponseData {
+	if u == nil {
+		return &discordgo.InteractionResponseData{
+			Content: "Usage is not tracked: no Google TTS API key is configured.",
+			Flags:   discordgo.MessageFlagsEphemeral,
+		}
+	}
+	return &discordgo.InteractionResponseData{
+		Embeds: []*discordgo.MessageEmbed{usage.FormatUsageEmbed(u.Snapshot(), now)},
+		Flags:  discordgo.MessageFlagsEphemeral,
+	}
+}
+
+func ttsRespondData(s *discordgo.Session, i *discordgo.InteractionCreate, data *discordgo.InteractionResponseData) {
 	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{Content: content, Flags: discordgo.MessageFlagsEphemeral},
+		Data: data,
 	}); err != nil {
 		log.Printf("tts: failed to respond to interaction: %v", err)
 	}
 }
 
+func ttsRespondEphemeral(s *discordgo.Session, i *discordgo.InteractionCreate, content string) {
+	ttsRespondData(s, i, &discordgo.InteractionResponseData{
+		Content: content,
+		Flags:   discordgo.MessageFlagsEphemeral,
+	})
+}
+
 func ttsRespond(s *discordgo.Session, i *discordgo.InteractionCreate, content string) {
-	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{Content: content},
-	}); err != nil {
-		log.Printf("tts: failed to respond to interaction: %v", err)
-	}
+	ttsRespondData(s, i, &discordgo.InteractionResponseData{
+		Content: content,
+	})
 }

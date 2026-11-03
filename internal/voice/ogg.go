@@ -3,7 +3,6 @@ package voice
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 
@@ -146,10 +145,9 @@ func validateOpusHead(pkt []byte) error {
 	if channels < 1 || channels > Channels {
 		return fmt.Errorf("voice: ogg: unsupported channel count %d (want 1 or 2)", channels)
 	}
-	sampleRate := binary.LittleEndian.Uint32(pkt[12:16])
-	if sampleRate != SampleRate {
-		return fmt.Errorf("voice: ogg: unsupported sample rate %d Hz (want %d)", sampleRate, SampleRate)
-	}
+	// Bytes 12-15 hold the input sample rate, which RFC 7845 §5.1 says is
+	// informational only: Opus always decodes at 48 kHz. Google TTS writes
+	// 24000 there even when asked for 48 kHz, so it must not be checked.
 	if mappingFamily := pkt[18]; mappingFamily != 0 {
 		return fmt.Errorf("voice: ogg: unsupported channel mapping family %d", mappingFamily)
 	}

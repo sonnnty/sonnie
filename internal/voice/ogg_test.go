@@ -149,16 +149,6 @@ func TestOggOpusEncoder_RejectsOtherFormatsAndMalformedInput(t *testing.T) {
 			},
 		},
 		{
-			name: "wrong sample rate in OpusHead",
-			audio: tts.Audio{
-				Format: tts.FormatOggOpus,
-				Data: append(
-					makeOggPage(0x02, 0, []byte{byte(len(validHead))}, makeOpusHead(1, 24000)),
-					makeOggPage(0x00, 1, []byte{byte(len(validTags))}, validTags)...,
-				),
-			},
-		},
-		{
 			name: "invalid channel count in OpusHead",
 			audio: tts.Audio{
 				Format: tts.FormatOggOpus,
@@ -186,6 +176,35 @@ func TestOggOpusEncoder_RejectsOtherFormatsAndMalformedInput(t *testing.T) {
 				t.Fatalf("expected error for %s, got nil", tt.name)
 			}
 		})
+	}
+}
+
+// google-th-24k.ogg is real Google TTS output (th-TH-Neural2-C, OGG_OPUS,
+// sampleRateHertz 48000). Its OpusHead says 24000 Hz; the packets are still
+// 20 ms Opus frames that Discord accepts.
+func TestOggOpusEncoder_GoogleFixture(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "google-th-24k.ogg"))
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	frames, err := OggOpusEncoder{}.Encode(context.Background(), tts.Audio{
+		Format: tts.FormatOggOpus,
+		Data:   data,
+	})
+	if err != nil {
+		t.Fatalf("Encode failed: %v", err)
+	}
+	if len(frames) != 113 {
+		t.Fatalf("expected 113 frames, got %d", len(frames))
+	}
+	for i, f := range frames {
+		// TOC config 0-11 SILK, 12-15 hybrid, 16-31 CELT; config%4 == 1
+		// (SILK/CELT) or config%2 == 1 (hybrid) is 20 ms; code 0 is one frame.
+		cfg := f[0] >> 3
+		is20ms := (cfg < 12 && cfg%4 == 1) || (cfg >= 12 && cfg < 16 && cfg%2 == 1) || (cfg >= 16 && cfg%4 == 3)
+		if !is20ms || f[0]&0x03 != 0 {
+			t.Fatalf("frame %d: TOC 0x%02x is not a single 20 ms frame", i, f[0])
+		}
 	}
 }
 

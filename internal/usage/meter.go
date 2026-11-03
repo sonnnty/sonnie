@@ -20,6 +20,8 @@ import (
 	"time"
 	_ "time/tzdata" // the distroless image has no zoneinfo
 
+	"github.com/bwmarrin/discordgo"
+
 	"github.com/Sonty15/SONNIE/internal/tts"
 )
 
@@ -60,13 +62,14 @@ func (e *LimitError) Is(target error) bool { return target == ErrLimitReached }
 
 // Channel is the Discord side of the meter: the alert channel.
 type Channel interface {
-	// FindStatus returns the content of the newest status message the bot
-	// wrote in the channel, or "" if there is none.
-	FindStatus(ctx context.Context) (string, error)
-	// SaveStatus creates the status message, or edits it if it exists.
-	SaveStatus(ctx context.Context, content string) error
-	// Alert posts a new message in the channel.
-	Alert(ctx context.Context, content string) error
+	// FindStatus returns the newest status marker the bot wrote in the
+	// channel, or "" if there is none. isLegacy is true when found in an
+	// old plain-text message so the meter can migrate it to the embed format.
+	FindStatus(ctx context.Context) (marker string, isLegacy bool, err error)
+	// SaveStatus creates the status message with an embed, or edits it if it exists.
+	SaveStatus(ctx context.Context, embed *discordgo.MessageEmbed) error
+	// Alert posts a new message in the channel with notification preview text and an embed.
+	Alert(ctx context.Context, text string, embed *discordgo.MessageEmbed) error
 }
 
 // Mode selects what a Meter counts.
@@ -181,7 +184,7 @@ func (m *Meter) Start(ctx context.Context) {
 		return
 	}
 
-	content, err := m.cfg.Channel.FindStatus(ctx)
+	content, isLegacy, err := m.cfg.Channel.FindStatus(ctx)
 	switch {
 	case err != nil:
 		log.Printf("usage: could not restore the usage count from the alert channel (starting from 0): %v", err)
@@ -189,7 +192,10 @@ func (m *Meter) Start(ctx context.Context) {
 		log.Println("usage: no usage status message found in the alert channel; starting from 0")
 	default:
 		if st, ok := ParseMarker(content); ok {
-			m.restore(st)
+			m.restore(st, isLegacy)
+			if isLegacy {
+				m.Flush(ctx)
+			}
 		} else {
 			log.Println("usage: status message has no valid marker; starting from 0")
 		}
@@ -199,7 +205,7 @@ func (m *Meter) Start(ctx context.Context) {
 	go m.flushLoop()
 }
 
-func (m *Meter) restore(st State) {
+func (m *Meter) restore(st State, isLegacy bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.rolloverLocked()
@@ -217,8 +223,12 @@ func (m *Meter) restore(st State) {
 	for _, a := range st.Alerted {
 		m.alerted[a] = true
 	}
-	// The restored state is already what is stored; nothing to flush.
-	m.saved = m.version
+	if isLegacy {
+		m.version++
+	} else {
+		// The restored state is already what is stored; nothing to flush.
+		m.saved = m.version
+	}
 	log.Printf("usage: restored %s used in %s", formatAmount(m.cfg.Mode, m.used), m.month)
 }
 
@@ -366,6 +376,7 @@ func (m *Meter) percentLocked() int {
 type alert struct {
 	threshold int
 	text      string
+	embed     *discordgo.MessageEmbed
 }
 
 // claimAlertsLocked marks every not-yet-announced threshold <= percent as
@@ -381,7 +392,11 @@ func (m *Meter) claimAlertsLocked(percent int) []alert {
 		}
 		m.alerted[th] = true
 		m.version++
-		msgs = append(msgs, alert{th, alertText(m.cfg.Mode, th, m.used, m.cfg.Limit)})
+		msgs = append(msgs, alert{
+			threshold: th,
+			text:      AlertPreviewText(m.cfg.Mode, th),
+			embed:     FormatAlertEmbed(m.cfg.Mode, th, m.used, m.cfg.Limit, m.month),
+		})
 	}
 	return msgs
 }
@@ -433,7 +448,7 @@ func (m *Meter) alertWorker() {
 		m.mu.Unlock()
 
 		ctx, cancel := context.WithTimeout(context.Background(), channelTimeout)
-		err := m.cfg.Channel.Alert(ctx, msg.text)
+		err := m.cfg.Channel.Alert(ctx, msg.text, msg.embed)
 		cancel()
 		if err != nil {
 			log.Printf("usage: failed to post %d%% alert (will retry on next request): %v", msg.threshold, err)
@@ -508,7 +523,8 @@ func (m *Meter) Flush(ctx context.Context) {
 
 	ctx, cancel := context.WithTimeout(ctx, channelTimeout)
 	defer cancel()
-	if err := m.cfg.Channel.SaveStatus(ctx, FormatStatus(st, m.cfg.Limit)); err != nil {
+	embed := FormatStatusEmbed(st, m.cfg.Limit, m.cfg.Now())
+	if err := m.cfg.Channel.SaveStatus(ctx, embed); err != nil {
 		log.Printf("usage: failed to save usage status: %v", err)
 		return
 	}

@@ -8,6 +8,9 @@ import (
 	"log"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/bwmarrin/discordgo"
 
 	"github.com/Sonty15/SONNIE/internal/readaloud"
 	"github.com/Sonty15/SONNIE/internal/usage"
@@ -121,5 +124,60 @@ func TestTTSUsageReply(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestTTSUsageResponse(t *testing.T) {
+	now := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
+
+	// Untracked usage: ephemeral text response
+	respUntracked := ttsUsageResponse(nil, now)
+	if respUntracked.Flags != discordgo.MessageFlagsEphemeral {
+		t.Errorf("untracked flags = %v, want ephemeral (%v)", respUntracked.Flags, discordgo.MessageFlagsEphemeral)
+	}
+	if !strings.Contains(respUntracked.Content, "not tracked") {
+		t.Errorf("untracked content = %q", respUntracked.Content)
+	}
+	if len(respUntracked.Embeds) != 0 {
+		t.Errorf("untracked embeds = %v, want empty", respUntracked.Embeds)
+	}
+
+	// Active money mode: ephemeral embed response
+	snap := usage.Snapshot{
+		Month:   "2026-11",
+		Unit:    usage.UnitTHBMicro,
+		Used:    36200000,
+		Limit:   300000000,
+		Percent: 12,
+		AudioMs: 6700,
+	}
+	respMoney := ttsUsageResponse(fakeUsage{snap}, now)
+	if respMoney.Flags != discordgo.MessageFlagsEphemeral {
+		t.Errorf("money flags = %v, want ephemeral", respMoney.Flags)
+	}
+	if len(respMoney.Embeds) != 1 {
+		t.Fatalf("expected 1 embed, got %d", len(respMoney.Embeds))
+	}
+	emb := respMoney.Embeds[0]
+	if emb.Title != "🔊 Google TTS · พฤศจิกายน 2026" {
+		t.Errorf("title = %q", emb.Title)
+	}
+	if !strings.Contains(emb.Description, "▰▱▱▱▱▱▱▱▱▱  12%") || !strings.Contains(emb.Description, "฿36.20 / ฿300.00") {
+		t.Errorf("description: %q", emb.Description)
+	}
+	if emb.Color != usage.ColorGreen {
+		t.Errorf("color = %#x, want %#x", emb.Color, usage.ColorGreen)
+	}
+	if len(emb.Fields) != 3 {
+		t.Fatalf("fields = %d, want 3", len(emb.Fields))
+	}
+	if emb.Fields[0].Value != "6.7 วินาที" {
+		t.Errorf("audio field = %q", emb.Fields[0].Value)
+	}
+	if emb.Fields[1].Value != "🟢 กำลังอ่าน" {
+		t.Errorf("status field = %q", emb.Fields[1].Value)
+	}
+	if !strings.HasPrefix(emb.Fields[2].Value, "<t:") {
+		t.Errorf("reset field = %q", emb.Fields[2].Value)
 	}
 }

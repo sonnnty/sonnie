@@ -8,58 +8,71 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bwmarrin/discordgo"
+
 	"github.com/Sonty15/SONNIE/internal/tts"
 )
+
+type alertRecord struct {
+	text  string
+	embed *discordgo.MessageEmbed
+}
 
 type fakeChannel struct {
 	mu        sync.Mutex
 	status    string
+	isLegacy  bool
 	findErr   error
 	saveErr   error
 	alertErr  error
-	saves     []string
-	alerts    []string
+	saves     []*discordgo.MessageEmbed
+	alerts    []alertRecord
 	alertFail int // fail this many Alert calls first
 }
 
-func (c *fakeChannel) FindStatus(context.Context) (string, error) {
+func (c *fakeChannel) FindStatus(context.Context) (string, bool, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.status, c.findErr
+	isLegacy := c.isLegacy
+	if !isLegacy && c.status != "" && !strings.Contains(c.status, StatusFooterHuman) {
+		isLegacy = true
+	}
+	return c.status, isLegacy, c.findErr
 }
 
-func (c *fakeChannel) SaveStatus(_ context.Context, content string) error {
+func (c *fakeChannel) SaveStatus(_ context.Context, embed *discordgo.MessageEmbed) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.saveErr != nil {
 		return c.saveErr
 	}
-	c.status = content
-	c.saves = append(c.saves, content)
+	c.status = embed.Footer.Text
+	c.isLegacy = false
+	c.saves = append(c.saves, embed)
 	return nil
 }
 
-func (c *fakeChannel) Alert(_ context.Context, content string) error {
+func (c *fakeChannel) Alert(_ context.Context, text string, embed *discordgo.MessageEmbed) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.alertFail > 0 {
 		c.alertFail--
 		return errors.New("discord down")
 	}
-	c.alerts = append(c.alerts, content)
+	c.alerts = append(c.alerts, alertRecord{text: text, embed: embed})
 	return nil
 }
 
-func (c *fakeChannel) Alerts() []string {
+func (c *fakeChannel) Alerts() []alertRecord {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return append([]string(nil), c.alerts...)
+	return append([]alertRecord(nil), c.alerts...)
 }
 
-func (c *fakeChannel) Saves() []string {
+func (c *fakeChannel) Saves() []*discordgo.MessageEmbed {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return append([]string(nil), c.saves...)
+	return append([]*discordgo.MessageEmbed(nil), c.saves...)
 }
 
 type clock struct {
@@ -242,14 +255,14 @@ func TestMeter_ThresholdsFireOncePerMonth(t *testing.T) {
 	if len(alerts) != 3 {
 		t.Fatalf("expected 3 alerts, got %d: %v", len(alerts), alerts)
 	}
-	if !strings.Contains(alerts[0], "50%") || !strings.Contains(alerts[0], "(50 / 100 ตัวอักษร)") {
-		t.Errorf("50%% alert: %q", alerts[0])
+	if !strings.Contains(alerts[0].text, "50%") || !strings.Contains(alerts[0].embed.Description, "50 / 100 ตัวอักษร") || alerts[0].embed.Color != ColorYellow {
+		t.Errorf("50%% alert: %+v", alerts[0])
 	}
-	if !strings.Contains(alerts[1], "80%") || !strings.Contains(alerts[1], "(80 / 100 ตัวอักษร)") {
-		t.Errorf("80%% alert: %q", alerts[1])
+	if !strings.Contains(alerts[1].text, "80%") || !strings.Contains(alerts[1].embed.Description, "80 / 100 ตัวอักษร") || alerts[1].embed.Color != ColorOrange {
+		t.Errorf("80%% alert: %+v", alerts[1])
 	}
-	if !strings.Contains(alerts[2], "หยุดอ่านออกเสียงจนกว่าจะถึงเดือนหน้า") {
-		t.Errorf("100%% alert should say reading is paused: %q", alerts[2])
+	if !strings.Contains(alerts[2].text, "หยุดอ่าน") || alerts[2].embed.Color != ColorRed {
+		t.Errorf("100%% alert should say reading is paused: %+v", alerts[2])
 	}
 
 	// A new month fires them again.
@@ -273,7 +286,7 @@ func TestMeter_RefusalAtLessThanFullFiresPausedAlert(t *testing.T) {
 	}
 	m.alertWG.Wait()
 	alerts := ch.Alerts()
-	if len(alerts) != 3 || !strings.Contains(alerts[2], "หยุดอ่าน") || !strings.Contains(alerts[2], "(95 / 100") {
+	if len(alerts) != 3 || !strings.Contains(alerts[2].text, "หยุดอ่าน") || !strings.Contains(alerts[2].embed.Description, "95 / 100") {
 		t.Fatalf("alerts: %v", alerts)
 	}
 }
@@ -293,7 +306,7 @@ func TestMeter_FailedAlertIsRetried(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.alertWG.Wait()
-	if a := ch.Alerts(); len(a) != 1 || !strings.Contains(a[0], "50%") {
+	if a := ch.Alerts(); len(a) != 1 || !strings.Contains(a[0].text, "50%") {
 		t.Fatalf("expected retried 50%% alert, got %v", a)
 	}
 }
@@ -324,7 +337,7 @@ func TestMeter_RestoresFromChannelAcrossRestart(t *testing.T) {
 	}
 	m2.Close()
 	alerts := ch.Alerts()
-	if len(alerts) != 2 || !strings.Contains(alerts[1], "80%") {
+	if len(alerts) != 2 || !strings.Contains(alerts[1].text, "80%") {
 		t.Fatalf("alerts after restart: %v", alerts)
 	}
 }
@@ -388,9 +401,36 @@ func TestMeter_FlushOnlyWhenChanged(t *testing.T) {
 	if len(saves) != 1 {
 		t.Fatalf("expected 1 save, got %d", len(saves))
 	}
-	st, ok := ParseMarker(saves[0])
+	st, ok := ParseMarkerFromEmbed(saves[0])
 	if !ok || st.Value != 3 || st.Month != "2026-11" {
-		t.Fatalf("saved %q -> %+v", saves[0], st)
+		t.Fatalf("saved %+v -> %+v", saves[0], st)
+	}
+}
+
+func TestMeter_RestoresAndMigratesLegacyContentMarker(t *testing.T) {
+	legacy := FormatStatus(State{Month: "2026-11", Unit: UnitChars, Value: 42, Alerted: []int{50}}, 100)
+	ch := &fakeChannel{status: legacy}
+	m := New(Config{Inner: &tts.Fake{}, Limit: 100, Channel: ch, Now: newClock().Now})
+	m.Start(context.Background())
+	defer m.Close()
+
+	if s := m.Snapshot(); s.Used != 42 {
+		t.Fatalf("restored used = %d, want 42", s.Used)
+	}
+	// Migrated to new embed immediately on startup
+	saves := ch.Saves()
+	if len(saves) != 1 {
+		t.Fatalf("expected legacy status to be migrated immediately, got %d saves", len(saves))
+	}
+	st, ok := ParseMarkerFromEmbed(saves[0])
+	if !ok || st.Value != 42 || st.Month != "2026-11" {
+		t.Fatalf("migrated marker: %+v (ok=%v)", st, ok)
+	}
+	if !strings.Contains(saves[0].Footer.Text, StatusFooterHuman) {
+		t.Fatalf("migrated footer missing human text: %q", saves[0].Footer.Text)
+	}
+	if !strings.Contains(saves[0].Description, "42 / 100 ตัวอักษร") {
+		t.Fatalf("migrated description: %q", saves[0].Description)
 	}
 }
 

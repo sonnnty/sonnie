@@ -192,7 +192,7 @@ func TestMeterMoney_RefusesOnceBudgetIsReached(t *testing.T) {
 	m.alertWG.Wait()
 	m.Close()
 	alerts := ch.Alerts()
-	if len(alerts) != 3 || !strings.Contains(alerts[2], "🛑") || !strings.Contains(alerts[2], "(฿0.07 / ฿0.05)") {
+	if len(alerts) != 3 || !strings.Contains(alerts[2].text, "🛑") || !strings.Contains(alerts[2].embed.Description, "฿0.07 / ฿0.05") {
 		t.Fatalf("alerts: %v", alerts)
 	}
 }
@@ -244,21 +244,18 @@ func TestMeterMoney_AlertsInBaht(t *testing.T) {
 	}
 	m.Close()
 
-	want := []string{
-		"⚠️ Google TTS ใช้ไป 50% ของงบเดือนนี้ (฿240.00 / ฿300.00)",
-		"⚠️ Google TTS ใช้ไป 80% ของงบเดือนนี้ (฿240.00 / ฿300.00)",
-		"🛑 Google TTS ใช้ครบงบเดือนนี้แล้ว (฿300.00 / ฿300.00) — หยุดอ่านออกเสียงจนกว่าจะถึงเดือนหน้า",
-	}
 	got := ch.Alerts()
 	if len(got) != 3 {
 		t.Fatalf("alerts: %v", got)
 	}
-	// The first request jumps straight from 0 to ฿240 only if both 50% and
-	// 80% fire in order; check each text.
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("alert %d:\n got %q\nwant %q", i, got[i], want[i])
-		}
+	if !strings.Contains(got[0].text, "50%") || !strings.Contains(got[0].embed.Description, "฿240.00 / ฿300.00") || got[0].embed.Color != ColorYellow {
+		t.Errorf("alert 0: %+v", got[0])
+	}
+	if !strings.Contains(got[1].text, "80%") || !strings.Contains(got[1].embed.Description, "฿240.00 / ฿300.00") || got[1].embed.Color != ColorOrange {
+		t.Errorf("alert 1: %+v", got[1])
+	}
+	if !strings.Contains(got[2].text, "🛑") || !strings.Contains(got[2].embed.Description, "฿300.00 / ฿300.00") || got[2].embed.Color != ColorRed {
+		t.Errorf("alert 2: %+v", got[2])
 	}
 }
 
@@ -299,12 +296,12 @@ func TestMeterMoney_PersistsMoneyMarker(t *testing.T) {
 	if len(saves) != 1 {
 		t.Fatalf("saves: %v", saves)
 	}
-	st, ok := ParseMarker(saves[0])
+	st, ok := ParseMarkerFromEmbed(saves[0])
 	if !ok || st.Unit != UnitTHBMicro || st.Value != 34980 || st.AudioMs != 4000 || st.Month != "2026-11" {
-		t.Fatalf("saved %q -> %+v", saves[0], st)
+		t.Fatalf("saved %+v -> %+v", saves[0], st)
 	}
-	if !strings.Contains(saves[0], "฿0.03 / ฿300.00") || !strings.Contains(saves[0], "4.0 วินาที") {
-		t.Fatalf("status summary: %q", saves[0])
+	if !strings.Contains(saves[0].Description, "฿0.03 / ฿300.00") || !strings.Contains(saves[0].Fields[0].Value, "4.0 วินาที") {
+		t.Fatalf("status summary: %+v", saves[0])
 	}
 }
 

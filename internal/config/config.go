@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -27,6 +28,17 @@ type TTSConfig struct {
 	// Voice, if non-empty, overrides the default voice name selected from
 	// Lang (e.g. "th-TH-Chirp3-HD-Achird").
 	Voice string
+	// Model, if non-empty (TTS_MODEL), selects a Gemini-TTS model such as
+	// "gemini-2.5-flash-tts". Empty keeps the classic voices (Chirp/Neural2).
+	Model string
+	// Prompt is an optional style prompt (TTS_PROMPT), sent only to Gemini
+	// models.
+	Prompt string
+	// MonthlyBudgetTHB is the money cap for Gemini models in baht per
+	// US/Pacific month (TTS_MONTHLY_BUDGET_THB). 0 means no cap.
+	MonthlyBudgetTHB float64
+	// USDToTHB converts the USD list price into baht (TTS_USD_TO_THB).
+	USDToTHB float64
 	// MaxChars caps how many characters of a single message are spoken.
 	MaxChars int
 	// QueueSize caps how many messages may wait per guild; the oldest
@@ -46,6 +58,9 @@ const (
 	defaultTTSLang      = "th"
 	defaultTTSMaxChars  = 200
 	defaultTTSQueueSize = 20
+
+	defaultTTSMonthlyBudgetTHB = 300
+	defaultTTSUSDToTHB         = 33
 
 	// defaultTTSMonthlyCharLimit is Google's free tier for Chirp 3: HD.
 	defaultTTSMonthlyCharLimit = 1000000
@@ -73,6 +88,8 @@ func loadTTS(getenv func(string) string) (TTSConfig, error) {
 		SpeakAuthor: true,
 
 		MonthlyCharLimit: defaultTTSMonthlyCharLimit,
+		MonthlyBudgetTHB: defaultTTSMonthlyBudgetTHB,
+		USDToTHB:         defaultTTSUSDToTHB,
 	}
 
 	if v := getenv("TTS_LANG"); v != "" {
@@ -80,6 +97,8 @@ func loadTTS(getenv func(string) string) (TTSConfig, error) {
 	}
 	cfg.Voice = getenv("TTS_VOICE")
 	cfg.GoogleAPIKey = getenv("GOOGLE_TTS_API_KEY")
+	cfg.Model = strings.TrimSpace(getenv("TTS_MODEL"))
+	cfg.Prompt = strings.TrimSpace(getenv("TTS_PROMPT"))
 
 	var err error
 	if cfg.Enabled, err = parseBool(getenv, "TTS_ENABLED", false); err != nil {
@@ -96,6 +115,12 @@ func loadTTS(getenv func(string) string) (TTSConfig, error) {
 	}
 
 	if cfg.MonthlyCharLimit, err = parseNonNegativeInt64(getenv, "TTS_MONTHLY_CHAR_LIMIT", cfg.MonthlyCharLimit); err != nil {
+		return TTSConfig{}, err
+	}
+	if cfg.MonthlyBudgetTHB, err = parseNonNegativeFloat(getenv, "TTS_MONTHLY_BUDGET_THB", cfg.MonthlyBudgetTHB); err != nil {
+		return TTSConfig{}, err
+	}
+	if cfg.USDToTHB, err = parsePositiveFloat(getenv, "TTS_USD_TO_THB", cfg.USDToTHB); err != nil {
 		return TTSConfig{}, err
 	}
 	if cfg.AlertChannelID = strings.TrimSpace(getenv("TTS_ALERT_CHANNEL_ID")); cfg.AlertChannelID != "" && !isSnowflake(cfg.AlertChannelID) {
@@ -124,6 +149,29 @@ func parseNonNegativeInt64(getenv func(string) string, key string, def int64) (i
 		return 0, fmt.Errorf("%s: %q is not a non-negative integer", key, v)
 	}
 	return n, nil
+}
+
+func parseNonNegativeFloat(getenv func(string) string, key string, def float64) (float64, error) {
+	v := strings.TrimSpace(getenv(key))
+	if v == "" {
+		return def, nil
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil || math.IsNaN(f) || math.IsInf(f, 0) || f < 0 {
+		return 0, fmt.Errorf("%s: %q is not a non-negative number", key, v)
+	}
+	return f, nil
+}
+
+func parsePositiveFloat(getenv func(string) string, key string, def float64) (float64, error) {
+	f, err := parseNonNegativeFloat(getenv, key, def)
+	if err != nil {
+		return 0, err
+	}
+	if f == 0 {
+		return 0, fmt.Errorf("%s: must be greater than 0", key)
+	}
+	return f, nil
 }
 
 func parseBool(getenv func(string) string, key string, def bool) (bool, error) {

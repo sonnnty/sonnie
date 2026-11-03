@@ -17,8 +17,8 @@ const statusScanLimit = 100
 // messageAPI is the part of *discordgo.Session the usage channel needs.
 type messageAPI interface {
 	ChannelMessages(channelID string, limit int, beforeID, afterID, aroundID string, options ...discordgo.RequestOption) ([]*discordgo.Message, error)
-	ChannelMessageSend(channelID, content string, options ...discordgo.RequestOption) (*discordgo.Message, error)
-	ChannelMessageEdit(channelID, messageID, content string, options ...discordgo.RequestOption) (*discordgo.Message, error)
+	ChannelMessageSendComplex(channelID string, data *discordgo.MessageSend, options ...discordgo.RequestOption) (*discordgo.Message, error)
+	ChannelMessageEditComplex(m *discordgo.MessageEdit, options ...discordgo.RequestOption) (*discordgo.Message, error)
 }
 
 // discordUsageChannel implements usage.Channel on a Discord text channel. It
@@ -50,11 +50,12 @@ func newDiscordUsageChannel(s *discordgo.Session, channelID string) *discordUsag
 }
 
 // FindStatus returns the newest message authored by the bot in the last 100
-// messages that carries a usage marker.
-func (c *discordUsageChannel) FindStatus(context.Context) (string, error) {
+// messages that carries a usage marker. It checks embed footer text first
+// (the current format) and falls back to plain content (legacy format).
+func (c *discordUsageChannel) FindStatus(context.Context) (string, bool, error) {
 	msgs, err := c.api.ChannelMessages(c.channelID, statusScanLimit, "", "", "")
 	if err != nil {
-		return "", fmt.Errorf("read alert channel %s: %w", c.channelID, err)
+		return "", false, fmt.Errorf("read alert channel %s: %w", c.channelID, err)
 	}
 	botID := c.botID()
 	// Discord returns newest first.
@@ -62,29 +63,48 @@ func (c *discordUsageChannel) FindStatus(context.Context) (string, error) {
 		if m == nil || m.Author == nil || botID == "" || m.Author.ID != botID {
 			continue
 		}
-		if _, ok := usage.ParseMarker(m.Content); !ok {
-			continue
+		// Check embeds first (new format: marker in footer text).
+		for _, e := range m.Embeds {
+			if e != nil && e.Footer != nil && e.Footer.Text != "" {
+				if _, ok := usage.ParseMarker(e.Footer.Text); ok {
+					c.mu.Lock()
+					c.messageID = m.ID
+					c.mu.Unlock()
+					return e.Footer.Text, false, nil
+				}
+			}
 		}
-		c.mu.Lock()
-		c.messageID = m.ID
-		c.mu.Unlock()
-		return m.Content, nil
+		// Fall back to message content (legacy v1/v2 plain text format).
+		if _, ok := usage.ParseMarker(m.Content); ok {
+			c.mu.Lock()
+			c.messageID = m.ID
+			c.mu.Unlock()
+			return m.Content, true, nil
+		}
 	}
-	return "", nil
+	return "", false, nil
 }
 
 // SaveStatus edits the status message, or posts a new one if there is none or
 // the old one can no longer be edited (for example it was deleted).
-func (c *discordUsageChannel) SaveStatus(_ context.Context, content string) error {
+// When editing an old plain-text message, it clears the content so only the
+// embed remains.
+func (c *discordUsageChannel) SaveStatus(_ context.Context, embed *discordgo.MessageEmbed) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.messageID != "" {
-		if _, err := c.api.ChannelMessageEdit(c.channelID, c.messageID, content); err == nil {
+		edit := discordgo.NewMessageEdit(c.channelID, c.messageID)
+		edit.SetContent("")
+		edit.SetEmbeds([]*discordgo.MessageEmbed{embed})
+		if _, err := c.api.ChannelMessageEditComplex(edit); err == nil {
 			return nil
 		}
 		c.messageID = ""
 	}
-	m, err := c.api.ChannelMessageSend(c.channelID, content)
+	send := &discordgo.MessageSend{
+		Embeds: []*discordgo.MessageEmbed{embed},
+	}
+	m, err := c.api.ChannelMessageSendComplex(c.channelID, send)
 	if err != nil {
 		return fmt.Errorf("post status message in %s: %w", c.channelID, err)
 	}
@@ -92,8 +112,12 @@ func (c *discordUsageChannel) SaveStatus(_ context.Context, content string) erro
 	return nil
 }
 
-func (c *discordUsageChannel) Alert(_ context.Context, content string) error {
-	if _, err := c.api.ChannelMessageSend(c.channelID, content); err != nil {
+func (c *discordUsageChannel) Alert(_ context.Context, content string, embed *discordgo.MessageEmbed) error {
+	send := &discordgo.MessageSend{
+		Content: content,
+		Embeds:  []*discordgo.MessageEmbed{embed},
+	}
+	if _, err := c.api.ChannelMessageSendComplex(c.channelID, send); err != nil {
 		return fmt.Errorf("post alert in %s: %w", c.channelID, err)
 	}
 	return nil

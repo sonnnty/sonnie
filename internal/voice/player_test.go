@@ -92,3 +92,95 @@ func TestUnimplementedEncoder(t *testing.T) {
 		t.Fatalf("expected ErrEncoderNotImplemented, got %v", err)
 	}
 }
+
+func recvDone(t *testing.T, c chan bool) bool {
+	t.Helper()
+	select {
+	case spoken := <-c:
+		return spoken
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the done hook")
+		return false
+	}
+}
+
+func TestPlayer_DoneFiresAfterTheLastFrameIsSent(t *testing.T) {
+	conn := &FakeConn{Sent: make(chan []byte)}
+	p := NewPlayer(PlayerConfig{Synth: &tts.Fake{}, Encoder: FakeEncoder{}, Conn: conn, QueueSize: 10})
+	defer p.Close()
+
+	done := make(chan bool, 2)
+	p.EnqueueWith("one", func(spoken bool) { done <- spoken })
+	p.EnqueueWith("two", func(spoken bool) { done <- spoken })
+
+	// SendOpus blocks until the test takes the frame: playing, not yet played.
+	select {
+	case <-done:
+		t.Fatal("done fired while the frame was still being sent")
+	case <-time.After(50 * time.Millisecond):
+	}
+	if got := waitFrame(t, conn.Sent); got != "one" {
+		t.Fatalf("first frame %q", got)
+	}
+	if !recvDone(t, done) {
+		t.Fatal("done(false) for a spoken item")
+	}
+	select {
+	case <-done:
+		t.Fatal("second item reported before it was played")
+	case <-time.After(50 * time.Millisecond):
+	}
+	waitFrame(t, conn.Sent)
+	if !recvDone(t, done) {
+		t.Fatal("done(false) for the second item")
+	}
+}
+
+func TestPlayer_DoneReportsFailureAndContinues(t *testing.T) {
+	p := NewPlayer(PlayerConfig{Synth: tts.Unimplemented{}, Encoder: FakeEncoder{}, Conn: &FakeConn{}, QueueSize: 10})
+	defer p.Close()
+
+	done := make(chan bool, 1)
+	p.EnqueueWith("x", func(spoken bool) { done <- spoken })
+	if recvDone(t, done) {
+		t.Fatal("a failed synthesis was reported as spoken")
+	}
+}
+
+func TestPlayer_DoneReportsDroppedItem(t *testing.T) {
+	// The first item blocks in SendOpus, so the rest sit in the queue.
+	conn := &FakeConn{Sent: make(chan []byte)}
+	p := NewPlayer(PlayerConfig{Synth: &tts.Fake{}, Encoder: FakeEncoder{}, Conn: conn, QueueSize: 1})
+	defer p.Close()
+
+	p.Enqueue("playing")
+	// The frame is recorded before SendOpus blocks on Sent.
+	for deadline := time.Now().Add(2 * time.Second); len(conn.Frames()) == 0; {
+		if time.Now().After(deadline) {
+			t.Fatal("the first item never started playing")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	done := make(chan bool, 2)
+	p.EnqueueWith("old", func(spoken bool) { done <- spoken })
+	if !p.EnqueueWith("new", nil) {
+		t.Fatal("expected the old item to be dropped")
+	}
+	if recvDone(t, done) {
+		t.Fatal("a dropped item was reported as spoken")
+	}
+}
+
+func TestPlayer_CloseDoesNotReportDiscardedItems(t *testing.T) {
+	conn := &FakeConn{Sent: make(chan []byte)}
+	p := NewPlayer(PlayerConfig{Synth: &tts.Fake{}, Encoder: FakeEncoder{}, Conn: conn, QueueSize: 10})
+	called := make(chan bool, 2)
+	p.EnqueueWith("a", func(bool) { called <- true })
+	p.EnqueueWith("b", func(bool) { called <- true })
+	p.Close()
+	select {
+	case <-called:
+		t.Fatal("done fired for an item cut off by Close")
+	case <-time.After(50 * time.Millisecond):
+	}
+}

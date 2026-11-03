@@ -200,8 +200,11 @@ type sessionView struct {
 	VoiceChannelID string
 	Started        time.Time
 	Manage         bool
-	Participants   []string
-	Left           []string
+	// PerMessage is true when each message is deleted soon after it is read
+	// (TTS_DELETE_AFTER), not only when the session ends.
+	PerMessage   bool
+	Participants []string
+	Left         []string
 }
 
 func (v sessionView) marker(open bool) SessionMarker {
@@ -215,10 +218,10 @@ func (v sessionView) marker(open bool) SessionMarker {
 	}
 }
 
-func footer(m SessionMarker) *discordgo.MessageEmbedFooter {
-	return &discordgo.MessageEmbedFooter{
-		Text: usage.StatusFooterHuman + "\n" + FormatSessionMarker(m),
-	}
+// footer is the small text of a session message: a human line, then the
+// hidden marker line.
+func footer(human string, m SessionMarker) *discordgo.MessageEmbedFooter {
+	return &discordgo.MessageEmbedFooter{Text: human + "\n" + FormatSessionMarker(m)}
 }
 
 // mentions renders ids as Discord mentions joined by sep. Mentions inside an
@@ -239,35 +242,28 @@ func mentions(ids []string, sep string) string {
 	return s
 }
 
-// sessionEmbed builds the live session message: who takes part, where, and
-// how to join or leave.
+// sessionEmbed builds the live session message, kept short: who takes part,
+// where, since when, and how to join or leave in the footer.
 func sessionEmbed(v sessionView) *discordgo.MessageEmbed {
-	desc := fmt.Sprintf("**ผู้เข้าร่วม (%d)**\n%s", len(v.Participants), mentions(v.Participants, " "))
-	if len(v.Participants) == 0 {
-		desc = "**ผู้เข้าร่วม (0)**\n-"
+	people := "-"
+	if len(v.Participants) > 0 {
+		people = mentions(v.Participants, " ")
 	}
 	color := colorActive
-	cleanup := "🧹 ข้อความของผู้เข้าร่วมในห้องนี้จะถูกลบเมื่อจบ"
+	deletion := "ลบข้อความเมื่อจบ"
+	if v.PerMessage {
+		deletion = "ลบข้อความหลังอ่าน"
+	}
 	if !v.Manage {
 		color = colorWarning
-		cleanup = "⚠️ บอทไม่มีสิทธิ์ Manage Messages ในห้องนี้ จึงจะไม่ลบข้อความเมื่อจบ"
+		deletion = "⚠️ ไม่มีสิทธิ์ลบข้อความ"
 	}
 	return &discordgo.MessageEmbed{
-		Title:       "🔊 กำลังอ่านออกเสียง",
-		Description: desc,
-		Color:       color,
-		Fields: []*discordgo.MessageEmbedField{
-			{Name: "ห้องข้อความ", Value: "<#" + v.TextChannelID + ">", Inline: true},
-			{Name: "ห้องเสียง", Value: "<#" + v.VoiceChannelID + ">", Inline: true},
-			{Name: "เริ่มเมื่อ", Value: fmt.Sprintf("<t:%d:R>", v.Started.Unix()), Inline: true},
-			{
-				Name: "วิธีใช้",
-				Value: "เข้าร่วม: `/tts join` (ต้องอยู่ในห้องเสียงนี้)\n" +
-					"ออก: `/tts leave`\n" +
-					"อ่านเฉพาะข้อความของผู้เข้าร่วม\n" + cleanup,
-			},
-		},
-		Footer:    footer(v.marker(true)),
+		Title: "🔊 กำลังอ่านออกเสียง",
+		Description: fmt.Sprintf("👥 %s\n🔈 <#%s> · <t:%d:R>",
+			people, v.VoiceChannelID, v.Started.Unix()),
+		Color:     color,
+		Footer:    footer("/tts join เพื่อให้อ่าน · /tts leave เพื่อออก · "+deletion, v.marker(true)),
 		Timestamp: v.Started.UTC().Format(time.RFC3339),
 	}
 }
@@ -281,24 +277,20 @@ type summary struct {
 }
 
 // summaryText is the one line the session message becomes when the session
-// ends, e.g. "📝 จบการอ่านออกเสียง · ผู้เข้าร่วม: @a, @b · 25 นาที · ลบข้อความแล้ว 42 ข้อความ".
+// ends, e.g. "📝 จบการอ่าน · @a @b · 25 นาที · ลบ 42 ข้อความ".
 func summaryText(s summary) string {
 	people := "-"
 	if len(s.Participants) > 0 {
-		people = mentions(s.Participants, ", ")
+		people = mentions(s.Participants, " ")
 	}
-	parts := []string{
-		"📝 จบการอ่านออกเสียง",
-		"ผู้เข้าร่วม: " + people,
-		formatSessionDuration(s.Duration),
-	}
+	parts := []string{"📝 จบการอ่าน", people, formatSessionDuration(s.Duration)}
 	switch c := s.Cleanup; {
 	case c.NoPermission:
-		parts = append(parts, "ไม่ได้ลบข้อความ (บอทไม่มีสิทธิ์ Manage Messages)")
+		parts = append(parts, "ไม่ได้ลบข้อความ (ไม่มีสิทธิ์)")
 	case c.Failed > 0:
-		parts = append(parts, fmt.Sprintf("ลบข้อความแล้ว %d ข้อความ (ลบไม่ได้ %d)", c.Deleted, c.Failed))
+		parts = append(parts, fmt.Sprintf("ลบ %d ข้อความ (ลบไม่ได้ %d)", c.Deleted, c.Failed))
 	default:
-		parts = append(parts, fmt.Sprintf("ลบข้อความแล้ว %d ข้อความ", c.Deleted))
+		parts = append(parts, fmt.Sprintf("ลบ %d ข้อความ", c.Deleted))
 	}
 	return strings.Join(parts, " · ")
 }
@@ -313,7 +305,7 @@ func summaryEmbed(v sessionView, s summary, ended time.Time) *discordgo.MessageE
 	return &discordgo.MessageEmbed{
 		Description: summaryText(s),
 		Color:       colorEnded,
-		Footer:      footer(m),
+		Footer:      footer(usage.StatusFooterHuman, m),
 		Timestamp:   ended.UTC().Format(time.RFC3339),
 	}
 }

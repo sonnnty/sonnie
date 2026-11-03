@@ -72,13 +72,13 @@ func TestTTSJoinReply(t *testing.T) {
 		not  []string
 	}{
 		{"started", &fakeTTSController{joinRes: readaloud.JoinResult{Started: true, Participants: 1, CanManage: true}},
-			[]string{"เริ่มอ่านออกเสียงแล้ว", "<#t>", "<#v>", "/tts leave", "จะถูกลบเมื่อจบ"}, []string{"Manage Messages"}},
+			[]string{"เข้าร่วมแล้ว", "<#t>", "อ่านแล้วลบ"}, []string{"ไม่มีสิทธิ์", "<#v>"}},
 		{"added", &fakeTTSController{joinRes: readaloud.JoinResult{Participants: 3, CanManage: true}},
-			[]string{"เข้าร่วมแล้ว", "ผู้เข้าร่วม 3 คน", "จะถูกลบเมื่อจบ"}, []string{"เริ่มอ่าน"}},
+			[]string{"เข้าร่วมแล้ว", "<#t>", "อ่านแล้วลบ"}, []string{"เริ่มอ่าน"}},
 		{"already in", &fakeTTSController{joinRes: readaloud.JoinResult{AlreadyIn: true, Participants: 2, CanManage: true}},
-			[]string{"อยู่ในการอ่านออกเสียงนี้อยู่แล้ว"}, []string{"จะถูกลบ"}},
+			[]string{"อยู่ในการอ่านนี้แล้ว"}, []string{"ลบ"}},
 		{"no manage messages", &fakeTTSController{joinRes: readaloud.JoinResult{Started: true, Participants: 1}},
-			[]string{"Manage Messages", "จะไม่ลบข้อความ"}, []string{"จะถูกลบเมื่อจบ"}},
+			[]string{"ไม่มีสิทธิ์ลบข้อความ"}, []string{"อ่านแล้วลบ"}},
 		{"busy elsewhere", &fakeTTSController{joinErr: &readaloud.BusyError{VoiceChannelID: "v9", TextChannelID: "t9"}},
 			[]string{"<#v9>", "<#t9>", "ยังมีคนอยู่"}, nil},
 		{"other text channel", &fakeTTSController{joinErr: &readaloud.TextChannelError{TextChannelID: "t9"}},
@@ -136,10 +136,10 @@ func TestTTSLeaveReply(t *testing.T) {
 		ctl  *fakeTTSController
 		want string
 	}{
-		{"others remain", &fakeTTSController{leaveRes: readaloud.LeaveResult{Participants: 2}}, "ยังเหลือผู้เข้าร่วม 2 คน"},
-		{"last one", &fakeTTSController{leaveRes: readaloud.LeaveResult{Ended: true}}, "จบการอ่านออกเสียง"},
+		{"others remain", &fakeTTSController{leaveRes: readaloud.LeaveResult{Participants: 2}}, "เหลืออีก 2 คน"},
+		{"last one", &fakeTTSController{leaveRes: readaloud.LeaveResult{Ended: true}}, "จบการอ่าน"},
 		{"not bound", &fakeTTSController{leaveErr: readaloud.ErrNotBound}, "ไม่ได้อ่านออกเสียงในเซิร์ฟเวอร์นี้"},
-		{"not a participant", &fakeTTSController{leaveErr: readaloud.ErrNotParticipant}, "คุณไม่ได้อยู่ในการอ่านออกเสียงนี้"},
+		{"not a participant", &fakeTTSController{leaveErr: readaloud.ErrNotParticipant}, "คุณไม่ได้อยู่ในการอ่านนี้"},
 		{"voice leave failed", &fakeTTSController{leaveRes: readaloud.LeaveResult{Ended: true}, leaveErr: errors.New("boom")}, "ออกจากห้องเสียงไม่สำเร็จ"},
 	}
 	for _, tt := range tests {

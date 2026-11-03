@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestLoad_ReturnsTokenFromEnv(t *testing.T) {
 	getenv := func(key string) string {
@@ -37,7 +40,7 @@ func TestLoad_TTSDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := TTSConfig{Enabled: false, Lang: "th", MaxChars: 200, QueueSize: 20, SpeakAuthor: true, MonthlyCharLimit: 1000000, MonthlyBudgetTHB: 300, USDToTHB: 33}
+	want := TTSConfig{Enabled: false, Lang: "th", MaxChars: 200, QueueSize: 20, SpeakAuthor: true, DeleteAfter: 8 * time.Second, MonthlyCharLimit: 1000000, MonthlyBudgetTHB: 300, USDToTHB: 33}
 	if cfg.TTS != want {
 		t.Fatalf("expected %+v, got %+v", want, cfg.TTS)
 	}
@@ -53,6 +56,7 @@ func TestLoad_TTSOverrides(t *testing.T) {
 		"TTS_MAX_CHARS":      "80",
 		"TTS_QUEUE_SIZE":     "5",
 		"TTS_SPEAK_AUTHOR":   "false",
+		"TTS_DELETE_AFTER":   "5s",
 
 		"TTS_MONTHLY_CHAR_LIMIT": "500000",
 		"TTS_ALERT_CHANNEL_ID":   "123456789012345678",
@@ -68,6 +72,7 @@ func TestLoad_TTSOverrides(t *testing.T) {
 		MaxChars:     80,
 		QueueSize:    5,
 		SpeakAuthor:  false,
+		DeleteAfter:  5 * time.Second,
 
 		MonthlyCharLimit: 500000,
 		MonthlyBudgetTHB: 300,
@@ -89,6 +94,9 @@ func TestLoad_TTSInvalidValues(t *testing.T) {
 		{"TTS_MAX_CHARS", "abc"},
 		{"TTS_MAX_CHARS", "0"},
 		{"TTS_QUEUE_SIZE", "-3"},
+		{"TTS_DELETE_AFTER", "-1s"},
+		{"TTS_DELETE_AFTER", "soon"},
+		{"TTS_DELETE_AFTER", "8"},
 		{"TTS_MONTHLY_CHAR_LIMIT", "-1"},
 		{"TTS_MONTHLY_CHAR_LIMIT", "1m"},
 		{"TTS_ALERT_CHANNEL_ID", "#alerts"},
@@ -164,6 +172,18 @@ func TestLoad_InvalidMoneySettings(t *testing.T) {
 	} {
 		if _, err := Load(envFrom(map[string]string{"DISCORD_BOT_TOKEN": "t", tt.key: tt.val})); err == nil {
 			t.Errorf("%s=%s: expected error", tt.key, tt.val)
+		}
+	}
+}
+
+func TestLoad_TTSDeleteAfterZeroTurnsItOff(t *testing.T) {
+	for _, v := range []string{"0", "0s"} {
+		cfg, err := Load(envFrom(map[string]string{"DISCORD_BOT_TOKEN": "t", "TTS_DELETE_AFTER": v}))
+		if err != nil {
+			t.Fatalf("TTS_DELETE_AFTER=%s: %v", v, err)
+		}
+		if cfg.TTS.DeleteAfter != 0 {
+			t.Fatalf("TTS_DELETE_AFTER=%s: DeleteAfter = %v, want 0", v, cfg.TTS.DeleteAfter)
 		}
 	}
 }

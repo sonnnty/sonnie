@@ -269,13 +269,13 @@ func TestSummaryText(t *testing.T) {
 		want string
 	}{
 		{"deleted", summary{people, 25 * time.Minute, CleanupResult{Deleted: 42}},
-			"📝 จบการอ่านออกเสียง · ผู้เข้าร่วม: <@1>, <@2> · 25 นาที · ลบข้อความแล้ว 42 ข้อความ"},
+			"📝 จบการอ่าน · <@1> <@2> · 25 นาที · ลบ 42 ข้อความ"},
 		{"failures", summary{people, time.Hour, CleanupResult{Deleted: 3, Failed: 2}},
-			"📝 จบการอ่านออกเสียง · ผู้เข้าร่วม: <@1>, <@2> · 1 ชั่วโมง · ลบข้อความแล้ว 3 ข้อความ (ลบไม่ได้ 2)"},
+			"📝 จบการอ่าน · <@1> <@2> · 1 ชั่วโมง · ลบ 3 ข้อความ (ลบไม่ได้ 2)"},
 		{"no permission", summary{people[:1], 90 * time.Minute, CleanupResult{NoPermission: true}},
-			"📝 จบการอ่านออกเสียง · ผู้เข้าร่วม: <@1> · 1 ชั่วโมง 30 นาที · ไม่ได้ลบข้อความ (บอทไม่มีสิทธิ์ Manage Messages)"},
+			"📝 จบการอ่าน · <@1> · 1 ชั่วโมง 30 นาที · ไม่ได้ลบข้อความ (ไม่มีสิทธิ์)"},
 		{"short", summary{nil, 20 * time.Second, CleanupResult{}},
-			"📝 จบการอ่านออกเสียง · ผู้เข้าร่วม: - · ไม่ถึง 1 นาที · ลบข้อความแล้ว 0 ข้อความ"},
+			"📝 จบการอ่าน · - · ไม่ถึง 1 นาที · ลบ 0 ข้อความ"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

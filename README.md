@@ -53,24 +53,41 @@ one session.
 ### How a session looks in Discord
 
 1. The **first** `/tts join` in a server makes the bot join your voice channel
-   and post **one public session message** (a Thai embed) in the text channel:
-   who takes part (as mentions, which do not notify anyone), the text and voice
-   channel, when it started, and how to join and leave. You get a private
-   (ephemeral) confirmation.
+   and post **one public session message** (a compact Thai embed) in the text
+   channel. You get a one-line private (ephemeral) confirmation.
+
+   ```
+   🔊 กำลังอ่านออกเสียง
+   👥 @a @b
+   🔈 #ห้องเสียง · เริ่มเมื่อ 3 นาทีที่แล้ว
+   /tts join เพื่อให้อ่าน · /tts leave เพื่อออก · ลบข้อความหลังอ่าน
+   ```
+
+   The participants are mentions (they do not notify anyone); the footer
+   (small text) says how to join and leave and what happens to messages. It
+   reads `ลบข้อความเมื่อจบ` when `TTS_DELETE_AFTER=0` and
+   `⚠️ ไม่มีสิทธิ์ลบข้อความ` (with an orange embed) when the bot lacks Manage
+   Messages. A hidden marker line below it lets a restarted bot finish the
+   session.
 2. Anyone else in **the same voice channel** runs `/tts join` **in the same
    text channel**. They are added and the bot **edits** the session message;
    it never posts a second one. They get a private confirmation.
 3. `/tts leave` removes you and edits the message. When the last participant
    leaves, the session ends.
-4. When a session ends (last participant left, nobody but bots left in the
+4. While the session runs, each participant message is **deleted a few
+   seconds after it has been read aloud** (see below).
+5. When a session ends (last participant left, nobody but bots left in the
    voice channel, the bot was disconnected or moved, or the bot shuts down),
    the bot **deletes the messages the participants wrote** in that text channel
-   during the session and turns the session message into a short summary that
-   stays in the channel as a log:
+   during the session that are still there and turns the session message into
+   a short summary that stays in the channel as a log:
 
    ```
-   📝 จบการอ่านออกเสียง · ผู้เข้าร่วม: @a, @b · 25 นาที · ลบข้อความแล้ว 42 ข้อความ
+   📝 จบการอ่าน · @a @b · 25 นาที · ลบ 42 ข้อความ
    ```
+
+   The count includes the messages deleted along the way. Failures show as
+   `(ลบไม่ได้ N)`; without the permission it says `ไม่ได้ลบข้อความ (ไม่มีสิทธิ์)`.
 
 Refusals are private and say what to do instead:
 
@@ -80,6 +97,28 @@ Refusals are private and say what to do instead:
 - `/tts join` from a **different text channel** while the session in your voice
   channel is bound to another one: refused, naming the bound text channel.
 - `/tts leave` when you are not in the session, or no session runs.
+
+#### Deleting each message after it is read (`TTS_DELETE_AFTER`)
+
+When the player has **finished playing** a participant's message (all audio
+sent, not merely queued), the bot deletes that message after
+`TTS_DELETE_AFTER` (default `8s`, i.e. the 5–10 s window; `0` turns this off
+and leaves only the clean-up at the end). Participant messages in the session's
+channel that are **not spoken** are deleted after the same delay, counted from
+the moment the bot gives up on them, so the channel stays clean: messages with
+nothing left to say after filtering (only a link, emoji or attachment), and
+ones skipped because the queue was full, synthesis failed or the monthly
+budget was reached. Messages of people who have left the session, and of people
+who never joined, are not touched this way.
+
+- Only when the bot had **Manage Messages** when the session started.
+- One single delete per message, in the background; speech never waits for it.
+- A failed delete is logged once (`deleting message … after it was read`) and
+  the message stays on the list for the clean-up at the end, which retries it.
+  Deleted messages leave the list and are counted in the summary.
+- When the session ends or the bot shuts down, pending timers are cancelled
+  and the end-of-session clean-up (which scans the channel history) takes
+  whatever is left, so nothing is deleted twice or missed.
 
 What gets deleted at the end, exactly: messages in the session's text channel
 by **anyone who took part at any time** (including people who joined and later
@@ -167,8 +206,8 @@ What works now:
    where people run `/tts join` it needs **View Channel**, **Send Messages**,
    **Embed Links** (the session message is an embed), **Read Message History**
    (the clean-up scans the history) and **Manage Messages** (to delete the
-   participants' messages when the session ends; without it reading works but
-   nothing is deleted). When inviting the bot, include the `bot` and
+   participants' messages, after they are read and when the session ends;
+   without it reading works but nothing is deleted). When inviting the bot, include the `bot` and
    `applications.commands` scopes. This invite URL asks for exactly those
    permissions (`3238912` = `0x316C00`: View Channel `0x400`, Send Messages
    `0x800`, **Manage Messages `0x2000`**, Embed Links `0x4000`, Read Message
@@ -205,6 +244,7 @@ What works now:
 | `TTS_USD_TO_THB`     | `33`    | Gemini only: exchange rate used to turn the USD price into baht |
 | `TTS_MAX_CHARS`      | `200`   | Max characters spoken per message                             |
 | `TTS_QUEUE_SIZE`     | `20`    | Max messages waiting per server; oldest is dropped            |
+| `TTS_DELETE_AFTER`   | `8s`    | Go duration: delete each participant's message this long after it has been read aloud (or skipped). `0` = only clean up when the session ends |
 | `TTS_SPEAK_AUTHOR`   | `true`  | Say the author's name before each message                     |
 | `TTS_MONTHLY_CHAR_LIMIT` | `1000000` | Chirp/Neural2 only (no `TTS_MODEL`): max characters sent to Google per US/Pacific month; reading pauses when the next message would exceed it. `0` = no cap |
 | `TTS_ALERT_CHANNEL_ID` | *(empty)* | Discord channel ID for usage alerts and the persisted counter (see below) |

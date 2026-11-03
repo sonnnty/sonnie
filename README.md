@@ -44,7 +44,9 @@ setter that the bot calls once at startup (see `SetTTS` in `tts.go`).
 
 `/tts join` makes the bot join your voice channel and read new messages
 from the text channel you ran it in. `/tts leave` stops reading and leaves
-the voice channel. Each server can have one active binding.
+the voice channel. `/tts usage` shows this month's Google TTS character
+usage (see [Usage cap and alerts](#usage-cap-and-alerts)). Each server can
+have one active binding.
 
 ### Status
 
@@ -113,6 +115,8 @@ What works now:
 | `TTS_MAX_CHARS`      | `200`   | Max characters spoken per message                             |
 | `TTS_QUEUE_SIZE`     | `20`    | Max messages waiting per server; oldest is dropped            |
 | `TTS_SPEAK_AUTHOR`   | `true`  | Say the author's name before each message                     |
+| `TTS_MONTHLY_CHAR_LIMIT` | `1000000` | Max characters sent to Google per US/Pacific month; reading pauses when the next message would exceed it. `0` = no cap |
+| `TTS_ALERT_CHANNEL_ID` | *(empty)* | Discord channel ID for usage alerts and the persisted counter (see below) |
 
 When `TTS_ENABLED` is off, `/tts` is still listed in Discord but replies
 that the feature is not enabled. `/ping` is unaffected either way.
@@ -127,6 +131,52 @@ the free tier, Neural2 voices cost **$16 per 1 million characters**
 Standard is $4 per 1 million characters). See the
 [Google Cloud Text-to-Speech pricing page](https://cloud.google.com/text-to-speech/pricing)
 for current rates.
+
+### Usage cap and alerts
+
+The bot counts every character (Unicode code points, spaces included) it
+sends to Google, and stops synthesizing once
+`used + message length > TTS_MONTHLY_CHAR_LIMIT`. The default of 1,000,000 is
+the Chirp 3: HD free tier, so the cap keeps the bill at $0. Skipped messages
+are simply not spoken; the first refusal each month is logged once. The count
+resets at the start of each calendar month in **US/Pacific** time, Google's
+billing time zone. Set `TTS_MONTHLY_CHAR_LIMIT=0` to count without a cap.
+Counting only happens when `GOOGLE_TTS_API_KEY` is set. Because the bot
+counts what it sends, the meter is only accurate if nothing else uses the same
+API key.
+
+`/tts usage` replies (only to you) with this month's characters used, the
+limit, the percentage and whether reading is paused.
+
+**Alerts.** Set `TTS_ALERT_CHANNEL_ID` to a text channel's ID (enable Developer
+Mode in Discord, right-click the channel, *Copy Channel ID*). The bot posts a
+Thai message the first time usage crosses 50%, 80% and 100% in a month, e.g.
+`⚠️ Google TTS ใช้ไป 80% ของโควตาเดือนนี้ (800,000 / 1,000,000 ตัวอักษร)`;
+the 100% message says reading is paused until next month. It also fires when
+a message is refused for not fitting in what is left, since usage may never
+land exactly on 100%. Each threshold fires once per month, also across
+restarts.
+
+**Persistence.** The deployment has no persistent volume, so the counter lives
+in Discord: the bot keeps one status message in the alert channel with a
+machine-readable marker line in a code block:
+
+```
+sonnie-tts-usage v1 month=2026-11 chars=12345 alerted=50,80
+```
+
+On startup the bot scans the channel's last 100 messages for the newest such
+message written by itself and restores the count from it (a marker from a
+different month means start at 0). It edits that message at most once a
+minute, only when the count changed, and once more on shutdown. A crash can
+lose up to a minute of counts. Do not delete the status message or let
+100+ messages pile up after it in that channel; if it cannot be found the
+count restarts at 0. Use a dedicated channel.
+
+The bot needs **View Channel**, **Send Messages** and **Read Message History**
+in the alert channel (no pinning, no other permissions). If
+`TTS_ALERT_CHANNEL_ID` is not set, the count is kept in memory only, resets
+when the bot restarts, and a warning is logged at startup.
 
 ### Host requirements
 

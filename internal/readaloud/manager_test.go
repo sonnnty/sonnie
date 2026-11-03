@@ -788,6 +788,23 @@ func TestManager_SummaryMentionsFailedDeletes(t *testing.T) {
 	}
 }
 
+func TestManager_ShutdownInterruptedCleanupKeepsSessionOpen(t *testing.T) {
+	e := newEnv(t)
+	e.mustJoin("u1")
+	msgID := e.sessionMessage()
+	e.say("u1", "hello")
+	e.m.stopBG() // the shutdown grace period ran out
+
+	if _, err := e.m.Leave("g1", "u1"); err != nil {
+		t.Fatal(err)
+	}
+	e.m.Wait()
+
+	if mk := e.liveMarker(msgID); !mk.Open || len(mk.All()) != 1 {
+		t.Fatalf("the session must stay open for recovery: %+v", mk)
+	}
+}
+
 func TestManager_RecoverFinishesUnfinishedSession(t *testing.T) {
 	e := newEnv(t)
 	// A session from before a restart: the bot's open session message, then

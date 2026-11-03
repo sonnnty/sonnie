@@ -567,6 +567,14 @@ func (m *Manager) finish(ctx context.Context, e endedSession) {
 		}, m.cfg.Now())
 	}
 
+	// Cut short by shutdown: leave the message open so the next start
+	// finishes the job instead of recording a summary that hides the rest.
+	if m.bg.Err() != nil {
+		log.Printf("tts: session end guild=%s text=%s: clean-up interrupted by shutdown (deleted=%d failed=%d); it is finished on the next start",
+			e.guildID, e.view.TextChannelID, res.Deleted, res.Failed)
+		return
+	}
+
 	duration := e.ended.Sub(e.view.Started)
 	embed := summaryEmbed(e.view, summary{Participants: e.everyone, Duration: duration, Cleanup: res}, e.ended)
 	// The clean-up may have used up the context; the summary is what marks

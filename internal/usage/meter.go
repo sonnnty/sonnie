@@ -1,5 +1,9 @@
-// Package usage meters the characters sent to Google Cloud Text-to-Speech,
-// enforces a monthly cap, raises threshold alerts and persists the counter.
+// Package usage meters Google Cloud Text-to-Speech, enforces a monthly cap,
+// raises threshold alerts and persists the counter.
+//
+// A Meter counts in one unit, chosen by Config.Mode: characters sent (Chirp
+// and Neural2 voices, which are priced per character) or money spent
+// (Gemini-TTS, which is priced per token of text in and audio out).
 //
 // The deployment has no persistent volume, so the counter is kept in Discord:
 // one status message in the alert channel holds a machine-readable marker
@@ -34,17 +38,21 @@ const (
 var Thresholds = []int{50, 80, 100}
 
 // ErrLimitReached matches every *LimitError with errors.Is.
-var ErrLimitReached = errors.New("usage: monthly TTS character limit reached")
+var ErrLimitReached = errors.New("usage: monthly TTS limit reached")
 
-// LimitError is returned by Meter.Synthesize when the request would exceed
-// the monthly limit. The text is not sent to Google.
+// LimitError is returned by Meter.Synthesize when the monthly limit is used
+// up. The text is not sent to Google. Used and Limit are in Unit.
 type LimitError struct {
 	Month string
+	Unit  string
 	Used  int64
 	Limit int64
 }
 
 func (e *LimitError) Error() string {
+	if e.Unit == UnitTHBMicro {
+		return fmt.Sprintf("usage: monthly TTS budget reached (%s/%s in %s)", FormatTHB(e.Used), FormatTHB(e.Limit), e.Month)
+	}
 	return fmt.Sprintf("usage: monthly TTS character limit reached (%d/%d chars in %s)", e.Used, e.Limit, e.Month)
 }
 
@@ -61,12 +69,41 @@ type Channel interface {
 	Alert(ctx context.Context, content string) error
 }
 
+// Mode selects what a Meter counts.
+type Mode int
+
+const (
+	// ModeChars counts characters sent and refuses a request that would
+	// exceed the cap. It is the default.
+	ModeChars Mode = iota
+	// ModeMoney prices every successful request (Gemini-TTS) and refuses
+	// once the spend so far has reached the budget. The cost of a request is
+	// unknown until the audio comes back, so the last message may overshoot.
+	ModeMoney
+)
+
+// Unit is the persisted unit of the mode.
+func (m Mode) Unit() string {
+	if m == ModeMoney {
+		return UnitTHBMicro
+	}
+	return UnitChars
+}
+
 // Config configures a Meter.
 type Config struct {
 	// Inner is the real synthesizer.
 	Inner tts.Synthesizer
-	// Limit is the monthly character cap; 0 means no cap.
+	// Mode selects characters (default) or money.
+	Mode Mode
+	// Limit is the monthly cap, in characters or (ModeMoney) micro-baht; 0
+	// means no cap.
 	Limit int64
+	// USDToTHB converts the USD price to baht; required for ModeMoney.
+	USDToTHB float64
+	// Prompt is the style prompt the inner synthesizer sends; it is billed
+	// as input tokens in ModeMoney.
+	Prompt string
 	// Channel persists the counter and receives alerts. If nil the meter
 	// is in-memory only.
 	Channel Channel
@@ -79,14 +116,16 @@ type Config struct {
 // Snapshot is a point-in-time view of the meter.
 type Snapshot struct {
 	Month   string
+	Unit    string // UnitChars or UnitTHBMicro: what Used and Limit are in
 	Used    int64
 	Limit   int64 // 0 means no cap
 	Percent int   // 0 when there is no cap, otherwise rounded down and at most 100
 	Paused  bool  // the cap is reached and reading is paused until next month
+	AudioMs int64 // audio generated this month; only metered in ModeMoney
 }
 
-// Meter wraps a tts.Synthesizer, counting every character handed to it. It is
-// safe for concurrent use.
+// Meter wraps a tts.Synthesizer, counting what it costs: characters or money,
+// depending on Config.Mode. It is safe for concurrent use.
 type Meter struct {
 	cfg Config
 	loc *time.Location
@@ -94,6 +133,7 @@ type Meter struct {
 	mu       sync.Mutex
 	month    string
 	used     int64
+	audioMs  int64
 	alerted  map[int]bool
 	refused  bool   // a request was refused this month
 	version  uint64 // bumped on every change worth persisting
@@ -167,14 +207,19 @@ func (m *Meter) restore(st State) {
 		log.Printf("usage: stored count is for %s, current month is %s; starting from 0", st.Month, m.month)
 		return
 	}
-	m.used = st.Chars
+	if st.Unit != m.cfg.Mode.Unit() {
+		log.Printf("usage: stored count is in %q but this process meters %q (voice model changed or legacy v1 marker); starting from 0", st.Unit, m.cfg.Mode.Unit())
+		return
+	}
+	m.used = st.Value
+	m.audioMs = st.AudioMs
 	m.alerted = map[int]bool{}
 	for _, a := range st.Alerted {
 		m.alerted[a] = true
 	}
 	// The restored state is already what is stored; nothing to flush.
 	m.saved = m.version
-	log.Printf("usage: restored %d characters used in %s", m.used, m.month)
+	log.Printf("usage: restored %s used in %s", formatAmount(m.cfg.Mode, m.used), m.month)
 }
 
 // rolloverLocked resets the counter when the billing month has changed.
@@ -182,28 +227,35 @@ func (m *Meter) rolloverLocked() {
 	if cur := m.currentMonth(); cur != m.month {
 		m.month = cur
 		m.used = 0
+		m.audioMs = 0
 		m.alerted = map[int]bool{}
 		m.refused = false
 		m.version++
 	}
 }
 
-// Synthesize implements tts.Synthesizer. It counts the runes of text before
-// calling the inner synthesizer, because a failed request may still be billed,
-// and refuses with a *LimitError when the count would exceed the limit.
+// Synthesize implements tts.Synthesizer. See synthesizeChars and
+// synthesizeMoney for the two metering modes.
 func (m *Meter) Synthesize(ctx context.Context, text, lang string) (tts.Audio, error) {
 	if err := ctx.Err(); err != nil {
 		return tts.Audio{}, err
 	}
+	if m.cfg.Mode == ModeMoney {
+		return m.synthesizeMoney(ctx, text, lang)
+	}
+	return m.synthesizeChars(ctx, text, lang)
+}
+
+// synthesizeChars counts the runes of text before calling the inner
+// synthesizer, because a failed request may still be billed, and refuses with
+// a *LimitError when the count would exceed the limit.
+func (m *Meter) synthesizeChars(ctx context.Context, text, lang string) (tts.Audio, error) {
 	n := int64(runeCount(text))
 
 	m.mu.Lock()
 	m.rolloverLocked()
 	if m.cfg.Limit > 0 && m.used+n > m.cfg.Limit {
-		limitErr := &LimitError{Month: m.month, Used: m.used, Limit: m.cfg.Limit}
-		m.refused = true
-		// Usage may never reach exactly 100% (the next message just does
-		// not fit), so the refusal itself counts as crossing it.
+		limitErr := m.refuseLocked()
 		alerts := m.claimAlertsLocked(100)
 		m.mu.Unlock()
 		m.sendAlerts(alerts)
@@ -216,6 +268,64 @@ func (m *Meter) Synthesize(ctx context.Context, text, lang string) (tts.Audio, e
 
 	m.sendAlerts(alerts)
 	return m.cfg.Inner.Synthesize(ctx, text, lang)
+}
+
+// synthesizeMoney refuses when the spend so far has already reached the
+// budget, otherwise calls the inner synthesizer and charges the cost of the
+// audio it returned. Failed requests are not charged.
+func (m *Meter) synthesizeMoney(ctx context.Context, text, lang string) (tts.Audio, error) {
+	m.mu.Lock()
+	m.rolloverLocked()
+	if m.cfg.Limit > 0 && m.used >= m.cfg.Limit {
+		limitErr := m.refuseLocked()
+		alerts := m.claimAlertsLocked(100)
+		m.mu.Unlock()
+		m.sendAlerts(alerts)
+		return tts.Audio{}, limitErr
+	}
+	m.mu.Unlock()
+
+	audio, err := m.cfg.Inner.Synthesize(ctx, text, lang)
+	if err != nil {
+		return audio, err
+	}
+
+	dur := audioDuration(audio)
+	cost := CostMicroTHB(dur, EstimateInputTokens(text, m.cfg.Prompt), m.cfg.USDToTHB)
+
+	m.mu.Lock()
+	m.rolloverLocked()
+	m.used += cost
+	m.audioMs += dur.Milliseconds()
+	m.version++
+	alerts := m.claimAlertsLocked(m.percentLocked())
+	m.mu.Unlock()
+	m.sendAlerts(alerts)
+	return audio, nil
+}
+
+// refuseLocked records a refusal and builds its error.
+func (m *Meter) refuseLocked() *LimitError {
+	m.refused = true
+	// Usage may never reach exactly 100% (the next message just does not
+	// fit, or the last one overshot), so the refusal itself counts as
+	// crossing it; callers claim the 100% alert.
+	return &LimitError{Month: m.month, Unit: m.cfg.Mode.Unit(), Used: m.used, Limit: m.cfg.Limit}
+}
+
+// audioDuration reads the length of the returned audio from the Ogg
+// granule position. If that fails (a malformed stream the player would also
+// reject) it falls back to an upper bound: no speech Opus stream is below
+// minOpusBitrate, so size/bitrate never under-bills.
+func audioDuration(a tts.Audio) time.Duration {
+	if a.Format == tts.FormatOggOpus {
+		if d, err := tts.OggOpusDuration(a.Data); err == nil {
+			return d
+		}
+	}
+	d := time.Duration(len(a.Data)) * 8 * time.Second / minOpusBitrate
+	log.Printf("usage: could not read the audio duration; billing an upper bound of %v from %d bytes", d, len(a.Data))
+	return d
 }
 
 func (m *Meter) percentLocked() int {
@@ -247,12 +357,19 @@ func (m *Meter) claimAlertsLocked(percent int) []alert {
 		}
 		m.alerted[th] = true
 		m.version++
-		msgs = append(msgs, alert{th, alertText(th, m.used, m.cfg.Limit)})
+		msgs = append(msgs, alert{th, alertText(m.cfg.Mode, th, m.used, m.cfg.Limit)})
 	}
 	return msgs
 }
 
-func alertText(threshold int, used, limit int64) string {
+func alertText(mode Mode, threshold int, used, limit int64) string {
+	if mode == ModeMoney {
+		amounts := fmt.Sprintf("(%s / %s)", FormatTHB(used), FormatTHB(limit))
+		if threshold >= 100 {
+			return fmt.Sprintf("🛑 Google TTS ใช้ครบงบเดือนนี้แล้ว %s — หยุดอ่านออกเสียงจนกว่าจะถึงเดือนหน้า", amounts)
+		}
+		return fmt.Sprintf("⚠️ Google TTS ใช้ไป %d%% ของงบเดือนนี้ %s", threshold, amounts)
+	}
 	counts := fmt.Sprintf("(%s / %s ตัวอักษร)", formatInt(used), formatInt(limit))
 	if threshold >= 100 {
 		return fmt.Sprintf("🛑 Google TTS ใช้ครบโควตาเดือนนี้แล้ว %s — หยุดอ่านออกเสียงจนกว่าจะถึงเดือนหน้า", counts)
@@ -311,6 +428,8 @@ func (m *Meter) Snapshot() Snapshot {
 	m.rolloverLocked()
 	return Snapshot{
 		Month:   m.month,
+		Unit:    m.cfg.Mode.Unit(),
+		AudioMs: m.audioMs,
 		Used:    m.used,
 		Limit:   m.cfg.Limit,
 		Percent: m.percentLocked(),
@@ -326,7 +445,7 @@ func (m *Meter) pendingSave() (State, uint64, bool) {
 	if m.version == m.saved {
 		return State{}, 0, false
 	}
-	st := State{Month: m.month, Chars: m.used}
+	st := State{Month: m.month, Unit: m.cfg.Mode.Unit(), Value: m.used, AudioMs: m.audioMs}
 	for _, th := range Thresholds {
 		if m.alerted[th] {
 			st.Alerted = append(st.Alerted, th)
@@ -394,9 +513,29 @@ func (m *Meter) Close() {
 // FormatStatus renders the full status message: a short Thai summary and the
 // marker line in a code block.
 func FormatStatus(st State, limit int64) string {
-	summary := fmt.Sprintf("📊 Google TTS เดือน %s — ใช้ไป %s ตัวอักษร", st.Month, formatInt(st.Chars))
-	if limit > 0 {
-		summary = fmt.Sprintf("📊 Google TTS เดือน %s — ใช้ไป %s / %s ตัวอักษร", st.Month, formatInt(st.Chars), formatInt(limit))
+	mode := ModeChars
+	if st.Unit == UnitTHBMicro {
+		mode = ModeMoney
+	}
+	var summary string
+	if mode == ModeMoney {
+		summary = fmt.Sprintf("📊 Google TTS เดือน %s — ใช้ไป %s", st.Month, FormatTHB(st.Value))
+		if limit > 0 {
+			summary += " / " + FormatTHB(limit)
+		}
+		summary += fmt.Sprintf(" (เสียง %s วินาที)", FormatSeconds(st.AudioMs))
+	} else {
+		summary = fmt.Sprintf("📊 Google TTS เดือน %s — ใช้ไป %s ตัวอักษร", st.Month, formatInt(st.Value))
+		if limit > 0 {
+			summary = fmt.Sprintf("📊 Google TTS เดือน %s — ใช้ไป %s / %s ตัวอักษร", st.Month, formatInt(st.Value), formatInt(limit))
+		}
 	}
 	return summary + "\n```\n" + FormatMarker(st) + "\n```"
+}
+
+func formatAmount(mode Mode, v int64) string {
+	if mode == ModeMoney {
+		return FormatTHB(v)
+	}
+	return formatInt(v) + " characters"
 }

@@ -55,8 +55,8 @@ func newTestChannel(api messageAPI) *discordUsageChannel {
 }
 
 func TestDiscordUsageChannel_FindStatusPicksNewestOwnMarker(t *testing.T) {
-	newer := usage.FormatStatus(usage.State{Month: "2026-11", Chars: 20}, 100)
-	older := usage.FormatStatus(usage.State{Month: "2026-11", Chars: 10}, 100)
+	newer := usage.FormatStatus(usage.State{Month: "2026-11", Unit: usage.UnitChars, Value: 20}, 100)
+	older := usage.FormatStatus(usage.State{Month: "2026-11", Unit: usage.UnitChars, Value: 10}, 100)
 	api := &fakeMessageAPI{history: []*discordgo.Message{
 		msg("1", "human", newer), // someone else quoting a marker: ignored
 		msg("2", "bot", "⚠️ Google TTS ใช้ไป 50%"),

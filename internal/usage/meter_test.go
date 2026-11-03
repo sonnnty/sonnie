@@ -330,7 +330,7 @@ func TestMeter_RestoresFromChannelAcrossRestart(t *testing.T) {
 }
 
 func TestMeter_RestoreIgnoresOtherMonth(t *testing.T) {
-	ch := &fakeChannel{status: FormatStatus(State{"2026-10", 99999, []int{50, 80, 100}}, 100000)}
+	ch := &fakeChannel{status: FormatStatus(State{Month: "2026-10", Unit: UnitChars, Value: 99999, Alerted: []int{50, 80, 100}}, 100000)}
 	m := New(Config{Inner: &tts.Fake{}, Limit: 100000, Channel: ch, Now: newClock().Now})
 	m.Start(context.Background())
 	defer m.Close()
@@ -355,7 +355,7 @@ func TestMeter_RestoreErrorOrGarbageStartsAtZero(t *testing.T) {
 }
 
 func TestMeter_RestoredFullCounterIsPaused(t *testing.T) {
-	ch := &fakeChannel{status: FormatStatus(State{"2026-11", 100, []int{50, 80, 100}}, 100)}
+	ch := &fakeChannel{status: FormatStatus(State{Month: "2026-11", Unit: UnitChars, Value: 100, Alerted: []int{50, 80, 100}}, 100)}
 	m := New(Config{Inner: &tts.Fake{}, Limit: 100, Channel: ch, Now: newClock().Now})
 	m.Start(context.Background())
 	defer m.Close()
@@ -389,7 +389,7 @@ func TestMeter_FlushOnlyWhenChanged(t *testing.T) {
 		t.Fatalf("expected 1 save, got %d", len(saves))
 	}
 	st, ok := ParseMarker(saves[0])
-	if !ok || st.Chars != 3 || st.Month != "2026-11" {
+	if !ok || st.Value != 3 || st.Month != "2026-11" {
 		t.Fatalf("saved %q -> %+v", saves[0], st)
 	}
 }

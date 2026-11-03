@@ -8,6 +8,7 @@ import (
 
 	"github.com/Sonty15/SONNIE/internal/config"
 	"github.com/Sonty15/SONNIE/internal/tts"
+	"github.com/Sonty15/SONNIE/internal/usage"
 	"github.com/Sonty15/SONNIE/internal/voice"
 )
 
@@ -86,5 +87,29 @@ func TestBotNew_MeterOnlyWithGoogleKey(t *testing.T) {
 	}
 	if without.meter != nil {
 		t.Fatal("no meter expected without a Google key")
+	}
+}
+
+func TestNewMeter_ModeFollowsModel(t *testing.T) {
+	chirp := newMeter(nil, config.TTSConfig{MonthlyCharLimit: 1000, MonthlyBudgetTHB: 300, USDToTHB: 33}, tts.Unimplemented{})
+	if s := chirp.Snapshot(); s.Unit != usage.UnitChars || s.Limit != 1000 {
+		t.Fatalf("non-Gemini snapshot %+v, want the character meter", s)
+	}
+
+	gemini := newMeter(nil, config.TTSConfig{
+		Model: "gemini-2.5-flash-tts", MonthlyCharLimit: 1000, MonthlyBudgetTHB: 300, USDToTHB: 33,
+	}, tts.Unimplemented{})
+	if s := gemini.Snapshot(); s.Unit != usage.UnitTHBMicro || s.Limit != 300000000 {
+		t.Fatalf("Gemini snapshot %+v, want a ฿300 money meter", s)
+	}
+}
+
+func TestNewSpeechPipeline_PassesGeminiSettings(t *testing.T) {
+	synth, _ := newSpeechPipeline(config.TTSConfig{
+		GoogleAPIKey: "k", Voice: "Charon", Model: "gemini-2.5-flash-tts", Prompt: "friendly",
+	})
+	g, ok := synth.(*tts.Google)
+	if !ok || g.Model != "gemini-2.5-flash-tts" || g.Prompt != "friendly" || g.Voice != "Charon" {
+		t.Fatalf("got %#v", synth)
 	}
 }

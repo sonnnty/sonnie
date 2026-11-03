@@ -23,6 +23,9 @@ const (
 
 	// DefaultVoiceTH is the default Thai voice (Neural2 female).
 	DefaultVoiceTH = "th-TH-Neural2-C"
+	// DefaultGeminiSpeaker is the speaker used with a Gemini model when no
+	// voice is configured.
+	DefaultGeminiSpeaker = "Charon"
 	// DefaultVoiceEN is the default English voice (Neural2 female).
 	DefaultVoiceEN = "en-US-Neural2-F"
 )
@@ -39,6 +42,14 @@ type Google struct {
 	// Voice, if non-empty, overrides the default voice name selected from
 	// the language code (e.g. "th-TH-Chirp3-HD-Achird").
 	Voice string
+	// Model, if it names a Gemini-TTS model (e.g. "gemini-2.5-flash-tts"),
+	// switches the request to the Gemini shape: Voice is then the bare
+	// speaker name (default DefaultGeminiSpeaker) and voice.modelName is
+	// set. Empty keeps the Chirp/Neural2 behaviour.
+	Model string
+	// Prompt is a natural-language style instruction sent as input.prompt.
+	// It is only sent for Gemini models; other voices reject it.
+	Prompt string
 	// Endpoint overrides DefaultGoogleEndpoint; intended for tests.
 	Endpoint string
 	// Client is the HTTP client used for requests. If nil, a client with a
@@ -53,12 +64,14 @@ type googleRequest struct {
 }
 
 type googleInput struct {
-	Text string `json:"text"`
+	Text   string `json:"text"`
+	Prompt string `json:"prompt,omitempty"`
 }
 
 type googleVoice struct {
 	LanguageCode string `json:"languageCode"`
 	Name         string `json:"name,omitempty"`
+	ModelName    string `json:"modelName,omitempty"`
 }
 
 type googleAudioConfig struct {
@@ -84,18 +97,7 @@ func (g *Google) Synthesize(ctx context.Context, text, lang string) (Audio, erro
 		return Audio{}, errors.New("tts: google: API key is not set")
 	}
 
-	langCode, voiceName := resolveVoice(lang, g.Voice)
-	payload, err := json.Marshal(googleRequest{
-		Input: googleInput{Text: text},
-		Voice: googleVoice{
-			LanguageCode: langCode,
-			Name:         voiceName,
-		},
-		AudioConfig: googleAudioConfig{
-			AudioEncoding:   googleAudioEncoding,
-			SampleRateHertz: googleSampleRateHertz,
-		},
-	})
+	payload, err := json.Marshal(g.buildRequest(text, lang))
 	if err != nil {
 		return Audio{}, fmt.Errorf("tts: google: marshal request: %w", err)
 	}
@@ -134,6 +136,43 @@ func (g *Google) Synthesize(ctx context.Context, text, lang string) (Audio, erro
 		return Audio{}, errors.New("tts: google: empty audioContent in response")
 	}
 	return Audio{Format: FormatOggOpus, Data: out.AudioContent}, nil
+}
+
+// IsGeminiModel reports whether model names a Gemini-TTS model.
+func IsGeminiModel(model string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "gemini")
+}
+
+func (g *Google) buildRequest(text, lang string) googleRequest {
+	req := googleRequest{
+		Input: googleInput{Text: text},
+		AudioConfig: googleAudioConfig{
+			AudioEncoding:   googleAudioEncoding,
+			SampleRateHertz: googleSampleRateHertz,
+		},
+	}
+	if IsGeminiModel(g.Model) {
+		speaker := strings.TrimSpace(g.Voice)
+		if speaker == "" {
+			speaker = DefaultGeminiSpeaker
+		}
+		req.Input.Prompt = strings.TrimSpace(g.Prompt)
+		req.Voice = googleVoice{
+			LanguageCode: languageCode(lang),
+			Name:         speaker,
+			ModelName:    strings.TrimSpace(g.Model),
+		}
+		return req
+	}
+	langCode, voiceName := resolveVoice(lang, g.Voice)
+	req.Voice = googleVoice{LanguageCode: langCode, Name: voiceName}
+	return req
+}
+
+// languageCode maps a short or BCP 47 language code to a Google languageCode.
+func languageCode(lang string) string {
+	code, _ := resolveVoice(lang, "")
+	return code
 }
 
 // resolveVoice maps a short or BCP 47 language code to a Google languageCode

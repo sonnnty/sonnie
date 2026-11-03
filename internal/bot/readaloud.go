@@ -35,8 +35,17 @@ func newReadAloud(s *discordgo.Session, cfg config.TTSConfig) (*readaloud.Manage
 	}), meter
 }
 
+// newMeter picks the meter mode from config, once per process: money for a
+// Gemini model (priced per token, so characters say little), characters
+// otherwise.
 func newMeter(s *discordgo.Session, cfg config.TTSConfig, inner tts.Synthesizer) *usage.Meter {
 	mc := usage.Config{Inner: inner, Limit: cfg.MonthlyCharLimit}
+	if tts.IsGeminiModel(cfg.Model) {
+		mc.Mode = usage.ModeMoney
+		mc.Limit = usage.MicroTHB(cfg.MonthlyBudgetTHB)
+		mc.USDToTHB = cfg.USDToTHB
+		mc.Prompt = cfg.Prompt
+	}
 	if cfg.AlertChannelID != "" {
 		mc.Channel = newDiscordUsageChannel(s, cfg.AlertChannelID)
 	}
@@ -51,6 +60,8 @@ func newSpeechPipeline(cfg config.TTSConfig) (tts.Synthesizer, voice.Encoder) {
 	return &tts.Google{
 		APIKey: cfg.GoogleAPIKey,
 		Voice:  cfg.Voice,
+		Model:  cfg.Model,
+		Prompt: cfg.Prompt,
 	}, voice.OggOpusEncoder{}
 }
 

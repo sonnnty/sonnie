@@ -65,7 +65,7 @@ func init() {
 				{
 					Type:        discordgo.ApplicationCommandOptionSubCommand,
 					Name:        "usage",
-					Description: "Show this month's Google TTS character usage",
+					Description: "Show this month's Google TTS usage",
 				},
 			},
 		},
@@ -145,16 +145,34 @@ func ttsUsageReply(u UsageReporter) string {
 		return "Usage is not tracked: no Google TTS API key is configured."
 	}
 	snap := u.Snapshot()
+	if snap.Unit == usage.UnitTHBMicro {
+		return ttsMoneyUsageReply(snap)
+	}
 	if snap.Limit <= 0 {
 		return fmt.Sprintf("Google TTS usage for %s (US/Pacific month): %s characters. No monthly cap is set.",
 			snap.Month, formatCount(snap.Used))
 	}
-	status := "Reading is active."
-	if snap.Paused {
-		status = "Reading is **paused** until next month."
-	}
 	return fmt.Sprintf("Google TTS usage for %s (US/Pacific month): %s / %s characters (%d%%). %s",
-		snap.Month, formatCount(snap.Used), formatCount(snap.Limit), snap.Percent, status)
+		snap.Month, formatCount(snap.Used), formatCount(snap.Limit), snap.Percent, ttsPausedText(snap))
+}
+
+// ttsMoneyUsageReply reports Gemini-TTS spend, which the meter prices in
+// micro-baht, plus the audio generated.
+func ttsMoneyUsageReply(snap usage.Snapshot) string {
+	audio := fmt.Sprintf("Audio generated: %s s.", usage.FormatSeconds(snap.AudioMs))
+	if snap.Limit <= 0 {
+		return fmt.Sprintf("Google TTS spend for %s (US/Pacific month): %s. No monthly budget is set. %s",
+			snap.Month, usage.FormatTHB(snap.Used), audio)
+	}
+	return fmt.Sprintf("Google TTS spend for %s (US/Pacific month): %s / %s budget (%d%%). %s %s",
+		snap.Month, usage.FormatTHB(snap.Used), usage.FormatTHB(snap.Limit), snap.Percent, ttsPausedText(snap), audio)
+}
+
+func ttsPausedText(snap usage.Snapshot) string {
+	if snap.Paused {
+		return "Reading is **paused** until next month."
+	}
+	return "Reading is active."
 }
 
 // formatCount renders n with thousands separators, e.g. 1,000,000.

@@ -37,7 +37,7 @@ func TestLoad_TTSDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := TTSConfig{Enabled: false, Lang: "th", MaxChars: 200, QueueSize: 20, SpeakAuthor: true, MonthlyCharLimit: 1000000}
+	want := TTSConfig{Enabled: false, Lang: "th", MaxChars: 200, QueueSize: 20, SpeakAuthor: true, MonthlyCharLimit: 1000000, MonthlyBudgetTHB: 300, USDToTHB: 33}
 	if cfg.TTS != want {
 		t.Fatalf("expected %+v, got %+v", want, cfg.TTS)
 	}
@@ -70,6 +70,8 @@ func TestLoad_TTSOverrides(t *testing.T) {
 		SpeakAuthor:  false,
 
 		MonthlyCharLimit: 500000,
+		MonthlyBudgetTHB: 300,
+		USDToTHB:         33,
 		AlertChannelID:   "123456789012345678",
 	}
 	if cfg.TTS != want {
@@ -107,5 +109,39 @@ func TestLoad_TTSMonthlyLimitZeroMeansNoCap(t *testing.T) {
 	}
 	if cfg.TTS.MonthlyCharLimit != 0 {
 		t.Fatalf("expected 0 (no cap), got %d", cfg.TTS.MonthlyCharLimit)
+	}
+}
+
+func TestLoad_GeminiSettings(t *testing.T) {
+	cfg, err := Load(envFrom(map[string]string{
+		"DISCORD_BOT_TOKEN":      "t",
+		"TTS_MODEL":              " gemini-2.5-flash-tts ",
+		"TTS_VOICE":              "Charon",
+		"TTS_PROMPT":             "พูดแบบเป็นกันเอง",
+		"TTS_MONTHLY_BUDGET_THB": "250.5",
+		"TTS_USD_TO_THB":         "34.25",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := cfg.TTS
+	if got.Model != "gemini-2.5-flash-tts" || got.Voice != "Charon" || got.Prompt != "พูดแบบเป็นกันเอง" ||
+		got.MonthlyBudgetTHB != 250.5 || got.USDToTHB != 34.25 {
+		t.Fatalf("unexpected gemini settings: %+v", got)
+	}
+}
+
+func TestLoad_InvalidMoneySettings(t *testing.T) {
+	for _, tt := range []struct{ key, val string }{
+		{"TTS_MONTHLY_BUDGET_THB", "-1"},
+		{"TTS_MONTHLY_BUDGET_THB", "abc"},
+		{"TTS_MONTHLY_BUDGET_THB", "NaN"},
+		{"TTS_USD_TO_THB", "0"},
+		{"TTS_USD_TO_THB", "-33"},
+		{"TTS_USD_TO_THB", "Inf"},
+	} {
+		if _, err := Load(envFrom(map[string]string{"DISCORD_BOT_TOKEN": "t", tt.key: tt.val})); err == nil {
+			t.Errorf("%s=%s: expected error", tt.key, tt.val)
+		}
 	}
 }

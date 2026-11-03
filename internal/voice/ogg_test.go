@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/Sonty15/SONNIE/internal/tts"
 )
@@ -234,4 +235,31 @@ func makeOggPage(headerType byte, seq uint32, segTable, payload []byte) []byte {
 	copy(page[oggPageHeaderSize:], segTable)
 	copy(page[oggPageHeaderSize+len(segTable):], payload)
 	return page
+}
+
+// OggOpusDuration (granule position) must agree with counting 20 ms packets.
+// The two differ only by the pre-skip, which libopus sets to 312 samples
+// (6.5 ms) for Google's streams, so allow one frame of slack.
+func TestOggOpusDuration_MatchesPacketCount(t *testing.T) {
+	for _, name := range []string{"sample.ogg", "google-th-24k.ogg"} {
+		t.Run(name, func(t *testing.T) {
+			data, err := os.ReadFile(filepath.Join("testdata", name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			frames, err := OggOpusEncoder{}.Encode(context.Background(), tts.Audio{Format: tts.FormatOggOpus, Data: data})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := tts.OggOpusDuration(data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			byPackets := time.Duration(len(frames)) * 20 * time.Millisecond
+			if diff := byPackets - got; diff < 0 || diff > 20*time.Millisecond {
+				t.Fatalf("granule duration %v vs %d packets × 20 ms = %v", got, len(frames), byPackets)
+			}
+			t.Logf("%s: %v by granule, %v by packets", name, got, byPackets)
+		})
+	}
 }

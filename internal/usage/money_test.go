@@ -248,7 +248,7 @@ func TestMeterMoney_AlertsInBaht(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("alerts: %v", got)
 	}
-	if !strings.Contains(got[0].text, "50%") || !strings.Contains(got[0].embed.Description, "฿240.00 / ฿300.00") || got[0].embed.Color != ColorYellow {
+	if !strings.Contains(got[0].text, "50%") || !strings.Contains(got[0].embed.Description, "฿240.00 / ฿300.00") || got[0].embed.Color != ColorOrange { // posted at 80%: colour follows the bar
 		t.Errorf("alert 0: %+v", got[0])
 	}
 	if !strings.Contains(got[1].text, "80%") || !strings.Contains(got[1].embed.Description, "฿240.00 / ฿300.00") || got[1].embed.Color != ColorOrange {

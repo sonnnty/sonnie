@@ -285,6 +285,6 @@ func FormatAlertEmbed(mode Mode, threshold int, used, limit int64, month string)
 	return &discordgo.MessageEmbed{
 		Title:       FormatTitle(month),
 		Description: desc,
-		Color:       EmbedColor(threshold),
+		Color:       EmbedColor(percent),
 	}
 }

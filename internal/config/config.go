@@ -6,6 +6,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Sonty15/SONNIE/internal/tts"
 )
@@ -58,6 +59,10 @@ type TTSConfig struct {
 	QueueSize int
 	// SpeakAuthor prefixes each message with the author's display name.
 	SpeakAuthor bool
+	// DeleteAfter (TTS_DELETE_AFTER) is how long after a message has been
+	// read aloud the bot deletes it. 0 turns per-message deletion off; the
+	// end-of-session clean-up still runs.
+	DeleteAfter time.Duration
 	// MonthlyCharLimit is the most characters sent to Google TTS per
 	// US/Pacific calendar month (TTS_MONTHLY_CHAR_LIMIT). 0 means no cap.
 	MonthlyCharLimit int64
@@ -70,6 +75,9 @@ const (
 	defaultTTSLang      = "th"
 	defaultTTSMaxChars  = 200
 	defaultTTSQueueSize = 20
+	// defaultTTSDeleteAfter leaves a message on screen a moment after it is
+	// read, so people see what was said.
+	defaultTTSDeleteAfter = 8 * time.Second
 
 	defaultTTSMonthlyBudgetTHB = 300
 	defaultTTSUSDToTHB         = 33
@@ -98,6 +106,7 @@ func loadTTS(getenv func(string) string) (TTSConfig, error) {
 		MaxChars:    defaultTTSMaxChars,
 		QueueSize:   defaultTTSQueueSize,
 		SpeakAuthor: true,
+		DeleteAfter: defaultTTSDeleteAfter,
 
 		MonthlyCharLimit: defaultTTSMonthlyCharLimit,
 		MonthlyBudgetTHB: defaultTTSMonthlyBudgetTHB,
@@ -127,6 +136,9 @@ func loadTTS(getenv func(string) string) (TTSConfig, error) {
 		return TTSConfig{}, err
 	}
 	if cfg.QueueSize, err = parsePositiveInt(getenv, "TTS_QUEUE_SIZE", cfg.QueueSize); err != nil {
+		return TTSConfig{}, err
+	}
+	if cfg.DeleteAfter, err = parseNonNegativeDuration(getenv, "TTS_DELETE_AFTER", cfg.DeleteAfter); err != nil {
 		return TTSConfig{}, err
 	}
 
@@ -212,4 +224,18 @@ func parsePositiveInt(getenv func(string) string, key string, def int) (int, err
 		return 0, fmt.Errorf("%s: %q is not a positive integer", key, v)
 	}
 	return n, nil
+}
+
+// parseNonNegativeDuration reads a Go duration such as "8s". A bare "0" is
+// accepted and means zero.
+func parseNonNegativeDuration(getenv func(string) string, key string, def time.Duration) (time.Duration, error) {
+	v := strings.TrimSpace(getenv(key))
+	if v == "" {
+		return def, nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d < 0 {
+		return 0, fmt.Errorf("%s: %q is not a non-negative duration such as 8s (0 turns it off)", key, v)
+	}
+	return d, nil
 }

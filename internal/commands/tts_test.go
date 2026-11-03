@@ -1,8 +1,11 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"log"
 	"strings"
 	"testing"
 
@@ -46,8 +49,22 @@ func TestTTSJoinReply(t *testing.T) {
 	}
 
 	ctl.joinErr = errors.New("boom")
-	if got := ttsJoinReply(context.Background(), ctl, "g", "v", "t"); !strings.Contains(got, "Connect and Speak") {
-		t.Fatalf("expected a permissions hint, got %q", got)
+	if got := ttsJoinReply(context.Background(), ctl, "g", "v", "t"); !strings.Contains(got, "Connect and Speak") || !strings.Contains(got, "voice connection") {
+		t.Fatalf("expected permissions and voice connection hint, got %q", got)
+	}
+
+	var logBuf bytes.Buffer
+	origLog := log.Writer()
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(origLog)
+
+	ctl.joinErr = fmt.Errorf("voice: join: %w", context.DeadlineExceeded)
+	gotTimeout := ttsJoinReply(context.Background(), ctl, "g", "v", "t")
+	if !strings.Contains(gotTimeout, "timed out") || !strings.Contains(gotTimeout, "Connect and Speak") {
+		t.Fatalf("expected timeout and permissions hint, got %q", gotTimeout)
+	}
+	if !strings.Contains(logBuf.String(), context.DeadlineExceeded.Error()) {
+		t.Fatalf("expected real error in log, got %q", logBuf.String())
 	}
 }
 

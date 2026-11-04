@@ -2,12 +2,14 @@ package bot
 
 import (
 	"context"
+	"log"
 
 	"github.com/bwmarrin/discordgo"
 
 	"github.com/Sonty15/SONNIE/internal/commands"
 	"github.com/Sonty15/SONNIE/internal/config"
 	"github.com/Sonty15/SONNIE/internal/events"
+	"github.com/Sonty15/SONNIE/internal/modal"
 	"github.com/Sonty15/SONNIE/internal/readaloud"
 	"github.com/Sonty15/SONNIE/internal/usage"
 )
@@ -59,6 +61,7 @@ func New(cfg config.Config) (*Bot, error) {
 
 func (b *Bot) Open() error {
 	b.Session.AddHandler(handleInteraction)
+	b.Session.AddHandler(handleModalSubmit)
 	b.Session.AddHandler(b.handleEventsGuildCreate)
 	b.Session.AddHandler(b.handleScheduledEventCreate)
 	b.Session.AddHandler(b.handleScheduledEventUpdate)
@@ -101,6 +104,29 @@ func handleInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		if c, ok := commands.FindComponent(i.MessageComponentData().CustomID); ok {
 			c.Component(s, i)
 		}
+	}
+	// Modal submits are left to handleModalSubmit.
+}
+
+// handleModalSubmit routes submitted modals. It reads the raw gateway
+// event because discordgo v0.29 cannot decode modals made of Label
+// components: it logs "error unmarshalling INTERACTION_CREATE event,
+// ... unknown component type: 18" and passes on the interaction without
+// data. That line is expected for every submitted /event form.
+func handleModalSubmit(s *discordgo.Session, e *discordgo.Event) {
+	if e.Type != "INTERACTION_CREATE" {
+		return
+	}
+	i, m, ok, err := modal.Decode(e.RawData)
+	if err != nil {
+		log.Printf("modal submit: %v", err)
+		return
+	}
+	if !ok {
+		return
+	}
+	if c, found := commands.FindModal(m.CustomID); found {
+		c.Modal(s, i, m)
 	}
 }
 

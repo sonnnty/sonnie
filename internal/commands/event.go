@@ -6,6 +6,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 
 	"github.com/Sonty15/SONNIE/internal/events"
+	"github.com/Sonty15/SONNIE/internal/modal"
 )
 
 // EventHandler is what /event needs from the events feature.
@@ -13,6 +14,7 @@ type EventHandler interface {
 	HandleCommand(i *discordgo.InteractionCreate)
 	HandleAutocomplete(i *discordgo.InteractionCreate)
 	HandleComponent(i *discordgo.InteractionCreate)
+	HandleModalSubmit(i *discordgo.InteractionCreate, m modal.Submit)
 }
 
 // eventHandler is set by SetEvents during startup.
@@ -45,6 +47,13 @@ func init() {
 				return
 			}
 			eventHandler.HandleComponent(i)
+		},
+		Modal: func(s *discordgo.Session, i *discordgo.InteractionCreate, m modal.Submit) {
+			if eventHandler == nil {
+				eventsNotReady(s, i)
+				return
+			}
+			eventHandler.HandleModalSubmit(i, m)
 		},
 	})
 }

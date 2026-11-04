@@ -43,7 +43,24 @@ func newEvents(s *discordgo.Session, cfg config.EventsConfig) (*events.Handler, 
 	}
 	log.Printf("events: covers from %s; Thai keywords via Gemini: %v; reminders: %s; auto start for others' events: %v",
 		strings.Join(finder.Providers.Names(), " → "), finder.Keywords != nil, remind, cfg.AutoStart)
-	return events.NewHandler(s, sched, finder, nil), sched
+	h := events.NewHandler(s, sched, finder, nil)
+	h.SetVoiceChannel(func(guildID, userID string) string { return voiceChannelOf(s.State, guildID, userID) })
+	return h, sched
+}
+
+// voiceChannelOf is the voice channel userID is in, from the gateway
+// state (voice states are in the default intents), or "" when they are
+// in none or in a stage, which the form's channel select does not offer.
+func voiceChannelOf(state *discordgo.State, guildID, userID string) string {
+	vs, err := state.VoiceState(guildID, userID)
+	if err != nil || vs.ChannelID == "" {
+		return ""
+	}
+	ch, err := state.Channel(vs.ChannelID)
+	if err != nil || ch.Type != discordgo.ChannelTypeGuildVoice {
+		return ""
+	}
+	return ch.ID
 }
 
 // newKeyworder returns nil (search by the raw name) when there is no

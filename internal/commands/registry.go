@@ -4,6 +4,8 @@ import (
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
+
+	"github.com/Sonty15/SONNIE/internal/modal"
 )
 
 type Command struct {
@@ -15,6 +17,9 @@ type Command struct {
 	// with ComponentPrefix.
 	ComponentPrefix string
 	Component       func(s *discordgo.Session, i *discordgo.InteractionCreate)
+	// Modal, if set, answers submitted modals whose custom ID starts with
+	// ComponentPrefix.
+	Modal func(s *discordgo.Session, i *discordgo.InteractionCreate, m modal.Submit)
 }
 
 var Registry []Command
@@ -36,6 +41,16 @@ func Find(name string) (Command, bool) {
 func FindComponent(customID string) (Command, bool) {
 	for _, c := range Registry {
 		if c.Component != nil && c.ComponentPrefix != "" && strings.HasPrefix(customID, c.ComponentPrefix) {
+			return c, true
+		}
+	}
+	return Command{}, false
+}
+
+// FindModal returns the command whose modals use customID.
+func FindModal(customID string) (Command, bool) {
+	for _, c := range Registry {
+		if c.Modal != nil && c.ComponentPrefix != "" && strings.HasPrefix(customID, c.ComponentPrefix) {
 			return c, true
 		}
 	}

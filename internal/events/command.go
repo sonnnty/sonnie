@@ -44,10 +44,11 @@ func CommandDefinition() *discordgo.ApplicationCommand {
 		DMPermission: &dm,
 		Options: []*discordgo.ApplicationCommandOption{
 			{
-				Type: discordgo.ApplicationCommandOptionSubCommand, Name: "create", Description: "สร้างอีเวนต์ พร้อมรูปปกที่บอทหาให้",
+				Type: discordgo.ApplicationCommandOptionSubCommand, Name: "create", Description: "สร้างอีเวนต์ พร้อมรูปปกที่บอทหาให้ (ไม่ใส่อะไรเลย = เปิดฟอร์ม)",
+				// All optional: without any, a form opens (see openForm).
 				Options: []*discordgo.ApplicationCommandOption{
-					str("name", "ชื่ออีเวนต์", true, maxNameLen),
-					str("when", whenDesc, true, 100),
+					str("name", "ชื่ออีเวนต์ (ไม่ใส่อะไรเลย = เปิดฟอร์ม)", false, maxNameLen),
+					str("when", whenDesc, false, 100),
 					placeOpt(),
 					str("location", "สถานที่ (ถ้าไม่ได้จัดในห้องเสียง) หรือลิงก์", false, maxLocationLen),
 					str("description", "รายละเอียด", false, maxUserDescription),

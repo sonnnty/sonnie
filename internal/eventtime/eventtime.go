@@ -30,6 +30,7 @@ var (
 	ErrInvalid        = errors.New("วันหรือเวลาไม่ถูกต้อง")
 	ErrEndBeforeStart = errors.New("เวลาจบต้องอยู่หลังเวลาเริ่ม")
 	ErrTooLong        = errors.New("อีเวนต์ยาวเกิน 31 วัน")
+	ErrDateInTime     = errors.New("ช่องเวลาใส่แค่เวลา เช่น `20:00`, `3 ทุ่ม` หรือ `บ่าย 2` — วันเลือกจากช่องวัน")
 )
 
 // UnknownError reports text the parser could not read.
@@ -50,6 +51,28 @@ func ParseStart(input string, now time.Time) (time.Time, error) {
 	if err != nil {
 		return time.Time{}, err
 	}
+	if !t.After(now) {
+		return time.Time{}, ErrPast
+	}
+	return t, nil
+}
+
+// ParseTimeOn reads a time of day ("20:00", "3 ทุ่ม", "บ่าย 2") on day, a
+// date picked separately (as in the /event create form). Only day's date
+// counts; "เที่ยงคืน" and "หกทุ่ม" are midnight at the end of it. Text that
+// also names a date or weekday is rejected with ErrDateInTime, and times
+// that are not after now with ErrPast.
+func ParseTimeOn(input string, day, now time.Time) (time.Time, error) {
+	p, err := read(input)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if p.date.kind != dateNone {
+		return time.Time{}, ErrDateInTime
+	}
+	day = day.In(Bangkok)
+	// Hour 24 normalizes to 00:00 the next day.
+	t := time.Date(day.Year(), day.Month(), day.Day(), p.hour, p.minute, 0, 0, Bangkok)
 	if !t.After(now) {
 		return time.Time{}, ErrPast
 	}

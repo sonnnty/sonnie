@@ -36,6 +36,8 @@ type Handler struct {
 	covers  CoverFinder
 	now     func() time.Time
 	pickers *pickerStore
+	// voiceChannel finds the caller's voice channel for the form; may be nil.
+	voiceChannel VoiceChannelFunc
 }
 
 func NewHandler(api API, sched *Scheduler, covers CoverFinder, now func() time.Time) *Handler {
@@ -132,12 +134,13 @@ func (h *Handler) editReply(i *discordgo.InteractionCreate, content string, embe
 	}
 }
 
-// createRequest is a validated /event create.
+// createRequest is a validated /event create, from options or the form.
 type createRequest struct {
 	params     discordgo.GuildScheduledEventParams
 	body       string
 	attachment *discordgo.MessageAttachment
 	keywords   string
+	note       string // for the reply, or ""
 }
 
 // parseCreate validates the options of /event create. The error is shown
@@ -145,16 +148,16 @@ type createRequest struct {
 func parseCreate(opts options, now time.Time) (createRequest, error) {
 	name := opts.str("name")
 	if name == "" {
-		return createRequest{}, errors.New("ใส่ชื่ออีเวนต์ด้วย")
+		return createRequest{}, badInput("name", name, errors.New("ใส่ชื่ออีเวนต์ด้วย"))
 	}
 	start, err := eventtime.ParseStart(opts.str("when"), now)
 	if err != nil {
-		return createRequest{}, fmt.Errorf("เวลาเริ่ม: %w", err)
+		return createRequest{}, timeError("when", "เวลาเริ่ม", opts.str("when"), err)
 	}
 	end := start.Add(eventtime.DefaultDuration)
 	if s := opts.str("end"); s != "" {
 		if end, err = eventtime.ParseEnd(s, start, now); err != nil {
-			return createRequest{}, fmt.Errorf("เวลาจบ: %w", err)
+			return createRequest{}, timeError("end", "เวลาจบ", s, err)
 		}
 	}
 	req := createRequest{
@@ -171,7 +174,7 @@ func parseCreate(opts options, now time.Time) (createRequest, error) {
 		return createRequest{}, err
 	}
 	if req.params.EntityType == 0 {
-		return createRequest{}, errors.New(msgPlaceOrLoc)
+		return createRequest{}, badInput("place/location", "", errors.New(msgPlaceOrLoc))
 	}
 	if req.attachment, err = imageAttachment(opts); err != nil {
 		return createRequest{}, err
@@ -184,7 +187,7 @@ func parseCreate(opts options, now time.Time) (createRequest, error) {
 func setPlace(p *discordgo.GuildScheduledEventParams, channelID, location string) error {
 	switch {
 	case channelID != "" && location != "":
-		return errors.New(msgPlaceOrLoc)
+		return badInput("place/location", "<#"+channelID+"> | "+location, errors.New(msgPlaceOrLoc))
 	case channelID != "":
 		p.EntityType = discordgo.GuildScheduledEventEntityTypeVoice
 		p.ChannelID = channelID
@@ -204,14 +207,15 @@ func imageAttachment(opts options) (*discordgo.MessageAttachment, error) {
 	}
 	a := opts.attachment("image")
 	if a == nil {
-		return nil, errors.New("อ่านไฟล์แนบไม่ได้ ลองแนบใหม่")
+		return nil, badInput("image", "", errors.New("อ่านไฟล์แนบไม่ได้ ลองแนบใหม่"))
 	}
+	value := fmt.Sprintf("%s (%s, %d bytes)", a.Filename, a.ContentType, a.Size)
 	ct := strings.ToLower(strings.TrimSpace(strings.SplitN(a.ContentType, ";", 2)[0]))
 	if !imageTypes[ct] {
-		return nil, errors.New("รูปปกต้องเป็น JPEG, PNG หรือ WebP")
+		return nil, badInput("image", value, errors.New("รูปปกต้องเป็น JPEG, PNG หรือ WebP"))
 	}
 	if a.Size > cover.MaxDownloadBytes {
-		return nil, errors.New("รูปปกต้องไม่เกิน 10 MB")
+		return nil, badInput("image", value, errors.New("รูปปกต้องไม่เกิน 10 MB"))
 	}
 	return a, nil
 }
@@ -221,11 +225,24 @@ func (h *Handler) create(i *discordgo.InteractionCreate, who caller, opts option
 		h.ephemeral(i, msgNoCreate)
 		return
 	}
-	req, err := parseCreate(opts, h.now())
-	if err != nil {
-		h.ephemeral(i, err.Error())
+	// Without options the form asks for everything; with any, they are
+	// all there is (as before the form).
+	if len(opts.byName) == 0 {
+		h.openForm(i, who)
 		return
 	}
+	req, err := parseCreate(opts, h.now())
+	if err != nil {
+		h.reject(i, who, "create", err)
+		return
+	}
+	h.publish(i, who, req)
+}
+
+// publish creates the event with a cover and replies with it in the
+// channel. It defers the reply first: a cover takes longer than the 3 s
+// Discord allows.
+func (h *Handler) publish(i *discordgo.InteractionCreate, who caller, req createRequest) {
 	// Finding a cover takes longer than the 3 s Discord allows.
 	if !h.deferReply(i, false) {
 		return
@@ -233,8 +250,11 @@ func (h *Handler) create(i *discordgo.InteractionCreate, who caller, opts option
 	ctx, cancel := context.WithTimeout(context.Background(), workTimeout)
 	defer cancel()
 
-	var cov cover.Cover
-	note := ""
+	var (
+		cov  cover.Cover
+		err  error
+		note string
+	)
 	if req.attachment != nil {
 		cov, err = h.covers.FromURL(ctx, req.attachment.URL)
 		if err != nil {
@@ -265,7 +285,17 @@ func (h *Handler) create(i *discordgo.InteractionCreate, who caller, opts option
 	log.Printf("events: %s created event %s (%q)", who.userID, ev.ID, ev.Name)
 	h.sched.SetCreator(ev.ID, who.userID)
 	h.sched.Upsert(ev)
-	h.editReply(i, note, []*discordgo.MessageEmbed{EventEmbed(ev)}, eventButtons(ev))
+	h.editReply(i, joinLines(req.note, note), []*discordgo.MessageEmbed{EventEmbed(ev)}, eventButtons(ev))
+}
+
+func joinLines(lines ...string) string {
+	var out []string
+	for _, l := range lines {
+		if l != "" {
+			out = append(out, l)
+		}
+	}
+	return strings.Join(out, "\n")
 }
 
 // findEvent resolves the event option: an ID picked from autocomplete, or
@@ -295,10 +325,10 @@ func (h *Handler) findEvent(guildID, value string) (*discordgo.GuildScheduledEve
 
 // managedEvent finds the event option and checks the caller may change it.
 // It answers the interaction itself when not.
-func (h *Handler) managedEvent(i *discordgo.InteractionCreate, who caller, value string) (*discordgo.GuildScheduledEvent, bool) {
+func (h *Handler) managedEvent(i *discordgo.InteractionCreate, who caller, sub, value string) (*discordgo.GuildScheduledEvent, bool) {
 	ev, err := h.findEvent(i.GuildID, value)
 	if err != nil {
-		h.ephemeral(i, err.Error())
+		h.reject(i, who, sub, badInput("event", value, err))
 		return nil, false
 	}
 	if !canManage(who.perms, who.userID, h.sched.Creator(ev)) {
@@ -321,7 +351,7 @@ func parseEdit(ev *discordgo.GuildScheduledEvent, opts options, now time.Time) (
 	if s := opts.str("when"); s != "" {
 		t, err := eventtime.ParseStart(s, now)
 		if err != nil {
-			return nil, fmt.Errorf("เวลาเริ่ม: %w", err)
+			return nil, timeError("when", "เวลาเริ่ม", s, err)
 		}
 		p.ScheduledStartTime = &t
 		start = t
@@ -335,7 +365,7 @@ func parseEdit(ev *discordgo.GuildScheduledEvent, opts options, now time.Time) (
 	if s := opts.str("end"); s != "" {
 		t, err := eventtime.ParseEnd(s, start, now)
 		if err != nil {
-			return nil, fmt.Errorf("เวลาจบ: %w", err)
+			return nil, timeError("end", "เวลาจบ", s, err)
 		}
 		p.ScheduledEndTime = &t
 		changed = true
@@ -362,19 +392,19 @@ func parseEdit(ev *discordgo.GuildScheduledEvent, opts options, now time.Time) (
 		changed = true
 	}
 	if !changed {
-		return nil, errors.New("ไม่มีอะไรให้แก้ — ใส่อย่างน้อยหนึ่งช่อง เช่น `when` หรือ `name`")
+		return nil, badInput("-", "", errors.New("ไม่มีอะไรให้แก้ — ใส่อย่างน้อยหนึ่งช่อง เช่น `when` หรือ `name`"))
 	}
 	return p, nil
 }
 
 func (h *Handler) edit(i *discordgo.InteractionCreate, who caller, opts options) {
-	ev, ok := h.managedEvent(i, who, opts.str("event"))
+	ev, ok := h.managedEvent(i, who, "edit", opts.str("event"))
 	if !ok {
 		return
 	}
 	p, err := parseEdit(ev, opts, h.now())
 	if err != nil {
-		h.ephemeral(i, err.Error())
+		h.reject(i, who, "edit", err)
 		return
 	}
 	if !h.deferReply(i, true) {
@@ -392,7 +422,7 @@ func (h *Handler) edit(i *discordgo.InteractionCreate, who caller, opts options)
 }
 
 func (h *Handler) cancel(i *discordgo.InteractionCreate, who caller, opts options) {
-	ev, ok := h.managedEvent(i, who, opts.str("event"))
+	ev, ok := h.managedEvent(i, who, "cancel", opts.str("event"))
 	if !ok {
 		return
 	}

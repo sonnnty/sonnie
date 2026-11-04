@@ -30,3 +30,13 @@ func TestEvent_IsRegisteredWithAutocomplete(t *testing.T) {
 		t.Fatal("/event is not registered with autocomplete and buttons")
 	}
 }
+
+func TestFindModal_RoutesEventForms(t *testing.T) {
+	c, ok := FindModal("event:form:1")
+	if !ok || c.Definition.Name != "event" || c.Modal == nil {
+		t.Fatalf("event form routed to %v, %v", c.Definition, ok)
+	}
+	if _, ok := FindModal("other:form"); ok {
+		t.Fatal("unknown modal was routed")
+	}
+}

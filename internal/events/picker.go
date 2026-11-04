@@ -116,13 +116,13 @@ func pickerMessage(p picker, eventName, note string) (string, []*discordgo.Messa
 }
 
 func (h *Handler) cover(i *discordgo.InteractionCreate, who caller, opts options) {
-	ev, ok := h.managedEvent(i, who, opts.str("event"))
+	ev, ok := h.managedEvent(i, who, "cover", opts.str("event"))
 	if !ok {
 		return
 	}
 	att, err := imageAttachment(opts)
 	if err != nil {
-		h.ephemeral(i, err.Error())
+		h.reject(i, who, "cover", err)
 		return
 	}
 	if !h.deferReply(i, true) {

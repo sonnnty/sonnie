@@ -46,7 +46,7 @@ buttons (`Command.Component`, for custom IDs starting with
 ## Server events (`/event`)
 
 `/event` creates and manages the server's Discord **Scheduled Events**, with a
-cover picture the bot finds on free image libraries by itself. It is separate
+cover picture the bot finds on image libraries (optionally the web, see Covers) by itself. It is separate
 from `/tts`: it never joins voice or reads chat, needs no privileged intent,
 and is always on.
 

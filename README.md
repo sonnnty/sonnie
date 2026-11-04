@@ -46,7 +46,7 @@ buttons (`Command.Component`, for custom IDs starting with
 ## Server events (`/event`)
 
 `/event` creates and manages the server's Discord **Scheduled Events**, with a
-cover picture the bot finds on free image libraries by itself. It is separate
+cover picture the bot finds on image libraries (optionally the web, see Covers) by itself. It is separate
 from `/tts`: it never joins voice or reads chat, needs no privileged intent,
 and is always on.
 
@@ -119,9 +119,13 @@ in the past are refused. `end` also takes a length (`3 ชม.`, `90 นาท�
    Each call logs one line; a permission error is logged once and the
    translation is then skipped until restart. It is not counted by the TTS
    money meter; one short call per event costs next to nothing.
-2. **Search.** Pexels (`PEXELS_API_KEY`) and Unsplash (`UNSPLASH_ACCESS_KEY`)
-   are tried first when their key is set; **Openverse** (no key) is always
-   the fallback. Landscape pictures at least 800 px wide come first.
+2. **Search.** The libraries with a key are asked first, in this order:
+   Brave web images (`BRAVE_SEARCH_API_KEY`, see below), Unsplash
+   (`UNSPLASH_ACCESS_KEY`), Pexels (`PEXELS_API_KEY`); **Openverse** (no
+   key) is always last. The 5 slots of `/event cover` are filled in that order,
+   asking the next library only when slots are still free and skipping a
+   picture whose image URL is already in the list. Within a library,
+   landscape pictures at least 800 px wide come first.
 3. **Cover.** The picture (JPEG, PNG or WebP, at most 10 MB) is cropped to
    5:2 around its centre and scaled to 800×320, in pure Go.
 
@@ -134,6 +138,39 @@ the line is replaced when the cover changes and kept when you edit the
 description. For Unsplash the bot also reports the download, as Unsplash's
 API terms require. A picture you attach yourself gets no credit line — make
 sure you may use it.
+
+**Brave web images — no licence.** With `BRAVE_SEARCH_API_KEY` set, the bot
+also searches the web for pictures with the Brave Search API
+(`safesearch=strict`, 20 results). These are **ordinary web images with no
+licence** — nobody has allowed their reuse. They are used because the owner
+asked for it, on a private, non-commercial friends' server; do not enable
+this on a public or commercial bot. Their credit line claims no licence,
+only where the picture is from: `📷 example.com · https://example.com/page`.
+Results are filtered: stock-photo/watermark sites (Getty, iStock,
+Shutterstock, Alamy, Dreamstime, 123RF, Depositphotos, Adobe Stock, Vecteezy,
+Freepik, Magnific, Pond5, CanStockPhoto, Bigstock, Age Fotostock; the list is
+`stockDomains` in `internal/cover/brave.go`), pictures under 800 px wide or
+not landscape (width/height < 1.2) when their size is known, and anything
+that is not an https/http JPEG, PNG or WebP URL (https first). If the full
+picture cannot be downloaded the next result is tried, never the thumbnail.
+**Brave first, Unsplash when the credit is gone.** Brave is tried first
+because web search finds game titles and specific things the photo
+libraries do not have. The owner's Brave plan has a monthly credit; when
+Brave answers HTTP 402, or 429 with no requests left in its *monthly*
+rate-limit window (`X-RateLimit-Remaining`, whose values come per window,
+e.g. `0, 0`), the bot **pauses Brave until the quota resets** — read from
+`X-RateLimit-Reset` (seconds), else the 1st of next month 00:00 UTC — and
+the other libraries (Unsplash first) fill the covers without calling Brave.
+A plain per-second 429 is not exhaustion: that one request just falls
+through to the next library. When a pause starts the bot posts one message
+in `EVENT_CHANNEL_ID` (else `TTS_ALERT_CHANNEL_ID`), e.g. `⚠️ เครดิต Brave
+Search เดือนนี้หมดแล้ว — ใช้รูปจาก Unsplash แทนจนถึง <date>`, once per pause,
+and logs a line. **The pause is kept in memory only**: after a restart Brave
+is tried again and pauses again on its first 402 (one wasted call, and one
+more alert).
+
+**To turn Brave off, unset `BRAVE_SEARCH_API_KEY`** (and restart): the bot
+then uses only the licensed libraries.
 
 ### Reminders and automatic start/end
 
@@ -171,12 +208,13 @@ reminder.
 | `EVENT_CHANNEL_ID` | `TTS_ALERT_CHANNEL_ID` | Channel for reminders. |
 | `EVENT_REMIND_BEFORE` | `15m` | How long before the start to remind; `0` = off. |
 | `EVENT_AUTO_START` | `true` | Also start/end events the bot did not create. |
-| `PEXELS_API_KEY` | – | Optional; adds Pexels before Openverse. |
-| `UNSPLASH_ACCESS_KEY` | – | Optional; adds Unsplash before Openverse. |
+| `PEXELS_API_KEY` | – | Optional; adds Pexels (after Unsplash) before Openverse. |
+| `UNSPLASH_ACCESS_KEY` | – | Optional; adds Unsplash before Openverse; it takes over while Brave is paused for the month. |
+| `BRAVE_SEARCH_API_KEY` | – | Optional secret; adds Brave web image search (unlicensed web images, private server only), tried first; paused until the monthly reset when its credit runs out. Unset = off. |
 | `GOOGLE_APPLICATION_CREDENTIALS` | – | Service account for the Thai → English keywords (shared with TTS). |
 
 Network: HTTPS to `api.openverse.org`, `api.pexels.com`, `api.unsplash.com`,
-`aiplatform.googleapis.com`, and to the hosts the pictures live on (Flickr,
+`api.search.brave.com`, `aiplatform.googleapis.com`, and to the hosts the pictures live on (Flickr,
 Wikimedia and others for Openverse).
 
 ## Read chat aloud (`/tts`)

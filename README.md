@@ -95,9 +95,13 @@ in the past are refused. `end` also takes a length (`3 ชม.`, `90 นาท�
    Each call logs one line; a permission error is logged once and the
    translation is then skipped until restart. It is not counted by the TTS
    money meter; one short call per event costs next to nothing.
-2. **Search.** Pexels (`PEXELS_API_KEY`) and Unsplash (`UNSPLASH_ACCESS_KEY`)
-   are tried first when their key is set; **Openverse** (no key) is always
-   the fallback. Landscape pictures at least 800 px wide come first.
+2. **Search.** The libraries with a key are asked first, in this order:
+   Pexels (`PEXELS_API_KEY`), Unsplash (`UNSPLASH_ACCESS_KEY`), Brave web
+   images (`BRAVE_SEARCH_API_KEY`, see below); **Openverse** (no key) is
+   always last. The 5 slots of `/event cover` are filled in that order,
+   asking the next library only when slots are still free and skipping a
+   picture whose image URL is already in the list. Within a library,
+   landscape pictures at least 800 px wide come first.
 3. **Cover.** The picture (JPEG, PNG or WebP, at most 10 MB) is cropped to
    5:2 around its centre and scaled to 800×320, in pure Go.
 
@@ -110,6 +114,23 @@ the line is replaced when the cover changes and kept when you edit the
 description. For Unsplash the bot also reports the download, as Unsplash's
 API terms require. A picture you attach yourself gets no credit line — make
 sure you may use it.
+
+**Brave web images — no licence.** With `BRAVE_SEARCH_API_KEY` set, the bot
+also searches the web for pictures with the Brave Search API
+(`safesearch=strict`, 20 results). These are **ordinary web images with no
+licence** — nobody has allowed their reuse. They are used because the owner
+asked for it, on a private, non-commercial friends' server; do not enable
+this on a public or commercial bot. Their credit line claims no licence,
+only where the picture is from: `📷 example.com · https://example.com/page`.
+Results are filtered: stock-photo/watermark sites (Getty, iStock,
+Shutterstock, Alamy, Dreamstime, 123RF, Depositphotos, Adobe Stock, Vecteezy,
+Freepik, Magnific, Pond5, CanStockPhoto, Bigstock, Age Fotostock; the list is
+`stockDomains` in `internal/cover/brave.go`), pictures under 800 px wide or
+not landscape (width/height < 1.2) when their size is known, and anything
+that is not an https/http JPEG, PNG or WebP URL (https first). If the full
+picture cannot be downloaded the next result is tried, never the thumbnail.
+**To turn Brave off, unset `BRAVE_SEARCH_API_KEY`** (and restart): the bot
+then uses only the licensed libraries.
 
 ### Reminders and automatic start/end
 
@@ -143,10 +164,11 @@ reminder.
 | `EVENT_AUTO_START` | `true` | Also start/end events the bot did not create. |
 | `PEXELS_API_KEY` | – | Optional; adds Pexels before Openverse. |
 | `UNSPLASH_ACCESS_KEY` | – | Optional; adds Unsplash before Openverse. |
+| `BRAVE_SEARCH_API_KEY` | – | Optional secret; adds Brave web image search (unlicensed web images, private server only) after Unsplash, before Openverse. Unset = off. |
 | `GOOGLE_APPLICATION_CREDENTIALS` | – | Service account for the Thai → English keywords (shared with TTS). |
 
 Network: HTTPS to `api.openverse.org`, `api.pexels.com`, `api.unsplash.com`,
-`aiplatform.googleapis.com`, and to the hosts the pictures live on (Flickr,
+`api.search.brave.com`, `aiplatform.googleapis.com`, and to the hosts the pictures live on (Flickr,
 Wikimedia and others for Openverse).
 
 ## Read chat aloud (`/tts`)

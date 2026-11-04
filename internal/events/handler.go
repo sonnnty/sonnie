@@ -36,6 +36,8 @@ type Handler struct {
 	covers  CoverFinder
 	now     func() time.Time
 	pickers *pickerStore
+	// voiceChannel finds the caller's voice channel for the form; may be nil.
+	voiceChannel VoiceChannelFunc
 }
 
 func NewHandler(api API, sched *Scheduler, covers CoverFinder, now func() time.Time) *Handler {
@@ -132,12 +134,13 @@ func (h *Handler) editReply(i *discordgo.InteractionCreate, content string, embe
 	}
 }
 
-// createRequest is a validated /event create.
+// createRequest is a validated /event create, from options or the form.
 type createRequest struct {
 	params     discordgo.GuildScheduledEventParams
 	body       string
 	attachment *discordgo.MessageAttachment
 	keywords   string
+	note       string // for the reply, or ""
 }
 
 // parseCreate validates the options of /event create. The error is shown
@@ -222,11 +225,24 @@ func (h *Handler) create(i *discordgo.InteractionCreate, who caller, opts option
 		h.ephemeral(i, msgNoCreate)
 		return
 	}
+	// Without options the form asks for everything; with any, they are
+	// all there is (as before the form).
+	if len(opts.byName) == 0 {
+		h.openForm(i, who)
+		return
+	}
 	req, err := parseCreate(opts, h.now())
 	if err != nil {
 		h.reject(i, who, "create", err)
 		return
 	}
+	h.publish(i, who, req)
+}
+
+// publish creates the event with a cover and replies with it in the
+// channel. It defers the reply first: a cover takes longer than the 3 s
+// Discord allows.
+func (h *Handler) publish(i *discordgo.InteractionCreate, who caller, req createRequest) {
 	// Finding a cover takes longer than the 3 s Discord allows.
 	if !h.deferReply(i, false) {
 		return
@@ -234,8 +250,11 @@ func (h *Handler) create(i *discordgo.InteractionCreate, who caller, opts option
 	ctx, cancel := context.WithTimeout(context.Background(), workTimeout)
 	defer cancel()
 
-	var cov cover.Cover
-	note := ""
+	var (
+		cov  cover.Cover
+		err  error
+		note string
+	)
 	if req.attachment != nil {
 		cov, err = h.covers.FromURL(ctx, req.attachment.URL)
 		if err != nil {
@@ -266,7 +285,17 @@ func (h *Handler) create(i *discordgo.InteractionCreate, who caller, opts option
 	log.Printf("events: %s created event %s (%q)", who.userID, ev.ID, ev.Name)
 	h.sched.SetCreator(ev.ID, who.userID)
 	h.sched.Upsert(ev)
-	h.editReply(i, note, []*discordgo.MessageEmbed{EventEmbed(ev)}, eventButtons(ev))
+	h.editReply(i, joinLines(req.note, note), []*discordgo.MessageEmbed{EventEmbed(ev)}, eventButtons(ev))
+}
+
+func joinLines(lines ...string) string {
+	var out []string
+	for _, l := range lines {
+		if l != "" {
+			out = append(out, l)
+		}
+	}
+	return strings.Join(out, "\n")
 }
 
 // findEvent resolves the event option: an ID picked from autocomplete, or

@@ -52,7 +52,8 @@ and is always on.
 
 | Command | What it does |
 |---|---|
-| `/event create name when [place] [location] [description] [end] [image] [keywords]` | Creates the event: in a voice channel (`place`) or somewhere else (`location`, text or a link); one of them is required. Without `image` the bot finds a cover. Replies in the channel with the event (time, place, cover) and a **🔄 เปลี่ยนรูป** button. |
+| `/event create` | Opens a form (below). |
+| `/event create name when [place] [location] [description] [end] [image] [keywords]` | For power users: with any option there is no form, and `name`, `when` and one of `place` (voice channel) or `location` (text or a link) are needed. Without `image` the bot finds a cover. Replies in the channel with the event (time, place, cover) and a **🔄 เปลี่ยนรูป** button. |
 | `/event cover event [keywords] [image]` | With `image`, uses that picture. Otherwise shows you (only you) 5 pictures with buttons **1**–**5** and **🔎 ค้นใหม่** (next page); a click puts the picture on the event. |
 | `/event edit event [name] [when] [end] [place] [location] [description]` | Changes what you give. Moving the start keeps the event's length. |
 | `/event cancel event` | Asks to confirm, then cancels (an event that is already running is ended instead). |
@@ -61,6 +62,29 @@ and is always on.
 The `event` option autocompletes from the upcoming events (`ศ. 6 พ.ย. 21:00 · เตะบอล`).
 Replies are compact Thai embeds; everything except the `/event create` reply is
 visible only to you.
+
+### The form
+
+`/event create` without options opens a form **สร้าง Event**:
+
+| Field | What |
+|---|---|
+| ชื่อ event | Required, up to 100 characters. |
+| วัน | A list: today and the next 24 days in Asia/Bangkok (`วันนี้ (พุธ 4 พ.ย.)`, `พรุ่งนี้ (พฤหัส 5 พ.ย.)`, `ศุกร์ 6 พ.ย.`, …); today is preselected. |
+| เวลา | Prefilled `20:00`; any time of day from [Times](#times) (`3 ทุ่ม`, `บ่าย 2`, `19.30`), on the chosen day. A date in this field is refused (pick it in วัน); a time that has already passed today is refused with what you typed. |
+| ห้องเสียง | A voice channel, optional; preselected with the one you are in. Left empty, the event is held outside voice with location `Discord` (the reply says so; change it with `/event edit location:`). |
+| รายละเอียด | Optional, up to 1000 characters (shortened at the end if the cover credit needs the room). |
+
+The event lasts 2 hours (change it with `/event edit end:`), gets a cover
+found by the bot and the same public reply as with options. Mistakes are
+answered privately; open the form again with `/event create`. A form left
+open across a bot update that changed the form is refused as outdated.
+
+The Discord library the bot uses (discordgo v0.29) cannot read forms built
+from Label components yet, so the bot reads the submitted form from the
+raw gateway event. discordgo still logs one harmless line per submitted
+form: `error unmarshalling INTERACTION_CREATE event, ... unknown component
+type: 18`.
 
 **Who may use it:** `create` needs **Create Events** or **Manage Events**;
 `edit`, `cover` and `cancel` need **Manage Events** or being the event's
@@ -127,6 +151,12 @@ sure you may use it.
   keeps them current from gateway events. A reminder whose time passed while
   the bot was down is skipped (never sent late or twice); an event that
   should be running is started, as long as its end has not passed.
+
+**Logs.** Every rejected input logs one line with the user, the
+subcommand, the field, what was typed (first 80 characters) and the error,
+e.g. `events: rejected /event create input from user 42: field when, value
+"<@123> พรุ่งนี้": …`. When `when` or `end` contains a mention the reply
+adds `ช่อง when ใส่เวลาเท่านั้น`.
 
 Kept in memory only, so lost on restart: open cover pickers (their buttons
 then say to run `/event cover` again) and who ran `/event create` for an

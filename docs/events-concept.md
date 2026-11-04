@@ -13,7 +13,7 @@ with a cover image the bot finds on the internet by itself.
 
 | Command | What it does |
 |---|---|
-| `/event create` | Name, date/time (Thai free text like "ศุกร์นี้ 3 ทุ่ม"), place (a voice channel, or free text/link), description, optional image attachment. Without an attachment the bot finds a cover (below). |
+| `/event create` | A form (as built; see below), or options: name, date/time (Thai free text like "ศุกร์นี้ 3 ทุ่ม"), place (a voice channel, or free text/link), description, optional image attachment. Without an attachment the bot finds a cover (below). |
 | `/event cover <event> [query]` | Change the cover: search again (by the event name, or by `query`) and offer a few candidates to pick from with buttons; or attach an image to use it directly. |
 | `/event edit <event>` | Change name, time, place, description. |
 | `/event cancel <event>` | Cancel the event. |
@@ -90,4 +90,15 @@ What differs from the concept above, and why:
 - **State:** nothing is persisted. Reminders whose time passed during a
   restart are skipped (never sent twice); open cover pickers expire after
   15 minutes or on restart.
+- **Form (2026-11-04):** the owner found the options hard to use live
+  (Discord shows only the required ones and hides `place`/`location`
+  behind "+6 more"), so `/event create` without options opens a modal
+  instead: name, day (select: today + 24 days), time (text, `20:00`
+  prefilled), voice channel (select, the caller's current one
+  preselected) and description. All create options are optional now;
+  with any of them the command works as before. Without a voice channel
+  the form makes an external event at `Discord`. The modal uses Label
+  components (type 18), which discordgo v0.29 cannot decode, so submits
+  are read from the raw gateway event (`internal/modal`). Rejected
+  inputs of any `/event` subcommand are logged with field and value.
 - **Not done:** recurring events.

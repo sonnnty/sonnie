@@ -252,3 +252,60 @@ func TestParseEnd_Errors(t *testing.T) {
 		t.Errorf("ParseEnd(นานๆ) error = %v, want UnknownError", err)
 	}
 }
+
+func TestParseTimeOn(t *testing.T) {
+	friday := time.Date(2026, 11, 6, 0, 0, 0, 0, Bangkok)
+	today := time.Date(2026, 11, 3, 0, 0, 0, 0, Bangkok)
+	tests := []struct {
+		in   string
+		day  time.Time
+		want time.Time
+	}{
+		{"20:00", friday, bkk(11, 6, 20, 0)},
+		{"3 ทุ่ม", friday, bkk(11, 6, 21, 0)},
+		{"บ่าย 2", friday, bkk(11, 6, 14, 0)},
+		{"เจ็ดโมงเช้า", friday, bkk(11, 6, 7, 0)},
+		{"ตี 2", friday, bkk(11, 6, 2, 0)},      // the picked date, not the night after
+		{"เที่ยงคืน", friday, bkk(11, 7, 0, 0)}, // midnight at the end of the day
+		{"8pm", friday, bkk(11, 6, 20, 0)},
+		{"18:01", today, bkk(11, 3, 18, 1)},
+		{"๒๐.๓๐ น.", today, bkk(11, 3, 20, 30)},
+		{"20:00", friday.Add(15 * time.Hour), bkk(11, 6, 20, 0)}, // only the date of day counts
+	}
+	for _, tt := range tests {
+		got, err := ParseTimeOn(tt.in, tt.day, now)
+		if err != nil {
+			t.Errorf("ParseTimeOn(%q, %s): %v", tt.in, tt.day.Format("02/01"), err)
+			continue
+		}
+		if !got.Equal(tt.want) {
+			t.Errorf("ParseTimeOn(%q, %s) = %s, want %s", tt.in, tt.day.Format("02/01"), got, tt.want)
+		}
+	}
+}
+
+func TestParseTimeOn_Errors(t *testing.T) {
+	today := time.Date(2026, 11, 3, 0, 0, 0, 0, Bangkok)
+	tests := []struct {
+		in   string
+		want error
+	}{
+		{"10:00", ErrPast},
+		{"18:00", ErrPast}, // exactly now
+		{"", ErrEmpty},
+		{"พรุ่งนี้ 20:00", ErrDateInTime},
+		{"ศุกร์ 3 ทุ่ม", ErrDateInTime},
+		{"12/11 19:00", ErrDateInTime},
+		{"25:00", ErrInvalid},
+		{"เวลา", ErrNoTime},
+	}
+	for _, tt := range tests {
+		if _, err := ParseTimeOn(tt.in, today, now); !errors.Is(err, tt.want) {
+			t.Errorf("ParseTimeOn(%q) error = %v, want %v", tt.in, err, tt.want)
+		}
+	}
+	var unknown *UnknownError
+	if _, err := ParseTimeOn("<@123> 20:00", today, now); !errors.As(err, &unknown) {
+		t.Errorf("mention: error %v, want UnknownError", err)
+	}
+}

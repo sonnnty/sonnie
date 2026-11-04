@@ -91,18 +91,21 @@ type UseTracker interface {
 // Chain asks providers in order until it has enough pictures.
 type Chain []Provider
 
-// NewChain puts the providers with an API key first (Pexels, Unsplash,
-// Brave) and Openverse, which needs none, last as the fallback.
-func NewChain(client *http.Client, pexelsKey, unsplashKey, braveKey string) Chain {
+// NewChain orders the providers: Brave first (web search finds game titles
+// and specific things the photo libraries lack), then Unsplash, which takes
+// over while Brave is paused for the month (see Brave), then Pexels, and
+// Openverse, which needs no key, last. Providers without a key are left
+// out. notify, which may be nil, hears when Brave's monthly credit runs out.
+func NewChain(client *http.Client, pexelsKey, unsplashKey, braveKey string, notify QuotaNotifier) Chain {
 	var c Chain
-	if pexelsKey != "" {
-		c = append(c, &Pexels{Key: pexelsKey, Client: client})
+	if braveKey != "" {
+		c = append(c, &Brave{Key: braveKey, Client: client, Notify: notify})
 	}
 	if unsplashKey != "" {
 		c = append(c, &Unsplash{Key: unsplashKey, Client: client})
 	}
-	if braveKey != "" {
-		c = append(c, &Brave{Key: braveKey, Client: client})
+	if pexelsKey != "" {
+		c = append(c, &Pexels{Key: pexelsKey, Client: client})
 	}
 	return append(c, &Openverse{Client: client})
 }
@@ -129,6 +132,9 @@ func (c Chain) Search(ctx context.Context, query string, page, perPage int) ([]C
 			break
 		}
 		cands, err := p.Search(ctx, query, page, perPage)
+		if errors.Is(err, ErrPaused) {
+			continue // not a failure: the provider is skipped until its quota resets
+		}
 		if err != nil {
 			log.Printf("cover: %s search %q: %v", p.Name(), query, err)
 			errs = append(errs, fmt.Errorf("%s: %w", p.Name(), err))
@@ -175,6 +181,16 @@ func usable(cands []Candidate) []Candidate {
 	return out
 }
 
+// HTTPError is a non-200 answer from a provider. The headers are kept for
+// callers that read rate limits (Brave).
+type HTTPError struct {
+	Status int
+	Header http.Header
+	Body   string
+}
+
+func (e *HTTPError) Error() string { return fmt.Sprintf("HTTP %d: %s", e.Status, e.Body) }
+
 const providerTimeout = 8 * time.Second
 
 func getJSON(ctx context.Context, client *http.Client, url string, header http.Header, v any) error {
@@ -199,7 +215,7 @@ func getJSON(ctx context.Context, client *http.Client, url string, header http.H
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
-		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return &HTTPError{Status: resp.StatusCode, Header: resp.Header, Body: strings.TrimSpace(string(body))}
 	}
 	if v == nil {
 		return nil

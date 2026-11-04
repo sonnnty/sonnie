@@ -188,7 +188,7 @@ func cand(provider, id string, w, h int) Candidate {
 	return Candidate{Provider: provider, ID: id, ImageURL: "https://img/" + id, ThumbURL: "https://thumb/" + id, Width: w, Height: h}
 }
 
-func TestNewChain_KeyedProvidersFirst(t *testing.T) {
+func TestNewChain_BraveThenUnsplashThenRest(t *testing.T) {
 	tests := []struct {
 		pexels, unsplash, brave string
 		want                    string
@@ -196,13 +196,13 @@ func TestNewChain_KeyedProvidersFirst(t *testing.T) {
 		{"", "", "", "openverse"},
 		{"p", "", "", "pexels,openverse"},
 		{"", "u", "", "unsplash,openverse"},
-		{"p", "u", "", "pexels,unsplash,openverse"},
+		{"p", "u", "", "unsplash,pexels,openverse"},
 		{"", "", "b", "brave,openverse"},
-		{"", "u", "b", "unsplash,brave,openverse"},
-		{"p", "u", "b", "pexels,unsplash,brave,openverse"},
+		{"", "u", "b", "brave,unsplash,openverse"},
+		{"p", "u", "b", "brave,unsplash,pexels,openverse"},
 	}
 	for _, tt := range tests {
-		if got := strings.Join(NewChain(nil, tt.pexels, tt.unsplash, tt.brave).Names(), ","); got != tt.want {
+		if got := strings.Join(NewChain(nil, tt.pexels, tt.unsplash, tt.brave, nil).Names(), ","); got != tt.want {
 			t.Errorf("NewChain(%q, %q, %q) = %s, want %s", tt.pexels, tt.unsplash, tt.brave, got, tt.want)
 		}
 	}

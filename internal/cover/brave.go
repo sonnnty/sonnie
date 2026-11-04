@@ -8,16 +8,31 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 )
 
 // Brave searches the web for pictures with the Brave Search API
 // (BRAVE_SEARCH_API_KEY). Unlike the other providers its results are
 // ordinary web images with no licence; the owner of a private server turns
 // it on by setting the key and off by unsetting it.
+//
+// When Brave answers that the monthly credit is used up (HTTP 402, or 429
+// with no requests left in the monthly rate-limit window), Brave is paused
+// until the quota resets and Search returns ErrPaused without calling the
+// API. The pause is in memory only: after a restart Brave is tried again
+// and pauses again on its first 402.
 type Brave struct {
 	Key     string
 	BaseURL string // default https://api.search.brave.com
 	Client  *http.Client
+	// Notify, if set, hears once per pause.
+	Notify QuotaNotifier
+	// Now is the clock; nil uses time.Now.
+	Now func() time.Time
+
+	mu    sync.Mutex
+	until time.Time // zero when not paused
 }
 
 // braveCount is how many results are asked for; a page of the picker is a
@@ -58,6 +73,9 @@ type braveResponse struct {
 }
 
 func (b *Brave) Search(ctx context.Context, query string, page, perPage int) ([]Candidate, error) {
+	if _, paused := b.pausedUntil(); paused {
+		return nil, ErrPaused
+	}
 	base := b.BaseURL
 	if base == "" {
 		base = "https://api.search.brave.com"
@@ -69,6 +87,9 @@ func (b *Brave) Search(ctx context.Context, query string, page, perPage int) ([]
 	header := http.Header{"X-Subscription-Token": {b.Key}}
 	var resp braveResponse
 	if err := getJSON(ctx, b.Client, base+"/res/v1/images/search?"+q.Encode(), header, &resp); err != nil {
+		if until, exhausted := quotaExhausted(err, b.now()); exhausted {
+			b.pause(until)
+		}
 		return nil, err
 	}
 	var out []Candidate

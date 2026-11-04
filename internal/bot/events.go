@@ -19,13 +19,17 @@ import (
 // imageHTTPTimeout bounds each request to an image library or image host.
 const imageHTTPTimeout = 15 * time.Second
 
-// newEvents builds /event: the cover finder (keyed providers first, then
-// Openverse; Gemini keywords when a service account is set) and the
-// scheduler for reminders and automatic start/end.
+// newEvents builds /event: the cover finder (Brave, Unsplash and Pexels
+// when they have a key, then Openverse; Gemini keywords when a service
+// account is set) and the scheduler for reminders and automatic start/end.
 func newEvents(s *discordgo.Session, cfg config.EventsConfig) (*events.Handler, *events.Scheduler) {
 	client := &http.Client{Timeout: imageHTTPTimeout}
+	fallback := "Openverse"
+	if cfg.UnsplashKey != "" {
+		fallback = "Unsplash"
+	}
 	finder := &cover.Finder{
-		Providers: cover.NewChain(client, cfg.PexelsKey, cfg.UnsplashKey, cfg.BraveKey),
+		Providers: cover.NewChain(client, cfg.PexelsKey, cfg.UnsplashKey, cfg.BraveKey, braveNotifier{s: s, channelID: cfg.ChannelID, fallback: fallback}),
 		Client:    client,
 		Keywords:  newKeyworder(cfg.GoogleCredentialsFile),
 	}

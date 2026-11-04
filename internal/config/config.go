@@ -33,6 +33,10 @@ type EventsConfig struct {
 	// those image libraries in front of Openverse, which needs no key.
 	PexelsKey   string
 	UnsplashKey string
+	// BraveKey (BRAVE_SEARCH_API_KEY, a secret) adds Brave web image search
+	// between Unsplash and Openverse. Those are ordinary web images without
+	// a licence; unset the key to turn it off.
+	BraveKey string
 	// GoogleCredentialsFile (GOOGLE_APPLICATION_CREDENTIALS) is the service
 	// account used to ask Gemini for English search keywords.
 	GoogleCredentialsFile string
@@ -136,6 +140,7 @@ func loadEvents(getenv func(string) string, alertChannelID string) (EventsConfig
 		AutoStart:             true,
 		PexelsKey:             strings.TrimSpace(getenv("PEXELS_API_KEY")),
 		UnsplashKey:           strings.TrimSpace(getenv("UNSPLASH_ACCESS_KEY")),
+		BraveKey:              strings.TrimSpace(getenv("BRAVE_SEARCH_API_KEY")),
 		GoogleCredentialsFile: strings.TrimSpace(getenv("GOOGLE_APPLICATION_CREDENTIALS")),
 	}
 	if id := strings.TrimSpace(getenv("EVENT_CHANNEL_ID")); id != "" {

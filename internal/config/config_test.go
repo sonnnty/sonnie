@@ -208,13 +208,14 @@ func TestLoad_EventOverrides(t *testing.T) {
 		"EVENT_AUTO_START":               "false",
 		"PEXELS_API_KEY":                 " pk ",
 		"UNSPLASH_ACCESS_KEY":            "uk",
+		"BRAVE_SEARCH_API_KEY":           " bk ",
 		"GOOGLE_APPLICATION_CREDENTIALS": "/secrets/sa.json",
 	}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := EventsConfig{ChannelID: "222", RemindBefore: 30 * time.Minute, AutoStart: false,
-		PexelsKey: "pk", UnsplashKey: "uk", GoogleCredentialsFile: "/secrets/sa.json"}
+		PexelsKey: "pk", UnsplashKey: "uk", BraveKey: "bk", GoogleCredentialsFile: "/secrets/sa.json"}
 	if cfg.Events != want {
 		t.Fatalf("expected %+v, got %+v", want, cfg.Events)
 	}

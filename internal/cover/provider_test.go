@@ -190,17 +190,20 @@ func cand(provider, id string, w, h int) Candidate {
 
 func TestNewChain_KeyedProvidersFirst(t *testing.T) {
 	tests := []struct {
-		pexels, unsplash string
-		want             string
+		pexels, unsplash, brave string
+		want                    string
 	}{
-		{"", "", "openverse"},
-		{"p", "", "pexels,openverse"},
-		{"", "u", "unsplash,openverse"},
-		{"p", "u", "pexels,unsplash,openverse"},
+		{"", "", "", "openverse"},
+		{"p", "", "", "pexels,openverse"},
+		{"", "u", "", "unsplash,openverse"},
+		{"p", "u", "", "pexels,unsplash,openverse"},
+		{"", "", "b", "brave,openverse"},
+		{"", "u", "b", "unsplash,brave,openverse"},
+		{"p", "u", "b", "pexels,unsplash,brave,openverse"},
 	}
 	for _, tt := range tests {
-		if got := strings.Join(NewChain(nil, tt.pexels, tt.unsplash).Names(), ","); got != tt.want {
-			t.Errorf("NewChain(%q, %q) = %s, want %s", tt.pexels, tt.unsplash, got, tt.want)
+		if got := strings.Join(NewChain(nil, tt.pexels, tt.unsplash, tt.brave).Names(), ","); got != tt.want {
+			t.Errorf("NewChain(%q, %q, %q) = %s, want %s", tt.pexels, tt.unsplash, tt.brave, got, tt.want)
 		}
 	}
 }
@@ -222,12 +225,57 @@ func TestChain_FallsBackOnErrorOrNoResults(t *testing.T) {
 	}
 }
 
-func TestChain_StopsAtFirstResults(t *testing.T) {
-	first := &fakeProvider{name: "pexels", cands: []Candidate{cand("pexels", "p", 2000, 1000)}}
-	ov := &fakeProvider{name: "openverse", cands: []Candidate{cand("openverse", "o", 2000, 1000)}}
-	got, err := Chain{first, ov}.Search(context.Background(), "q", 1, 5)
-	if err != nil || len(got) != 1 || got[0].Provider != "pexels" || ov.calls != 0 {
-		t.Fatalf("got %+v, %v; openverse calls %d", got, err, ov.calls)
+func ids(cands []Candidate) string {
+	var s []string
+	for _, c := range cands {
+		s = append(s, c.ID)
+	}
+	return strings.Join(s, ",")
+}
+
+func TestChain_FillsSlotsInProviderOrder(t *testing.T) {
+	u := &fakeProvider{name: "unsplash", cands: []Candidate{cand("unsplash", "u1", 2000, 1000), cand("unsplash", "u2", 2000, 1000)}}
+	b := &fakeProvider{name: "brave", cands: []Candidate{cand("brave", "b1", 1600, 900), cand("brave", "b2", 1600, 900), cand("brave", "b3", 1600, 900)}}
+	ov := &fakeProvider{name: "openverse", cands: []Candidate{cand("openverse", "o1", 2000, 1000), cand("openverse", "o2", 2000, 1000)}}
+	got, err := Chain{u, b, ov}.Search(context.Background(), "q", 1, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ids(got) != "u1,u2,b1,b2,b3" {
+		t.Fatalf("got %s, want unsplash, then brave to fill the 5 slots", ids(got))
+	}
+	if ov.calls != 0 {
+		t.Fatalf("openverse was asked although the slots were full")
+	}
+	// Brave short: Openverse fills the rest.
+	b.cands = b.cands[:1]
+	got, _ = Chain{u, b, ov}.Search(context.Background(), "q", 1, 5)
+	if ids(got) != "u1,u2,b1,o1,o2" {
+		t.Fatalf("got %s", ids(got))
+	}
+}
+
+func TestChain_SkipsDuplicateImageURLs(t *testing.T) {
+	u := &fakeProvider{name: "unsplash", cands: []Candidate{cand("unsplash", "u1", 2000, 1000)}}
+	dup := cand("brave", "b-dup", 1600, 900)
+	dup.ImageURL = u.cands[0].ImageURL
+	b := &fakeProvider{name: "brave", cands: []Candidate{dup, cand("brave", "b2", 1600, 900), dup}}
+	ov := &fakeProvider{name: "openverse", cands: []Candidate{cand("openverse", "o1", 2000, 1000)}}
+	got, err := Chain{u, b, ov}.Search(context.Background(), "q", 1, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ids(got) != "u1,b2,o1" {
+		t.Fatalf("got %s, want u1,b2,o1", ids(got))
+	}
+}
+
+func TestChain_PartialFailureKeepsResults(t *testing.T) {
+	u := &fakeProvider{name: "unsplash", cands: []Candidate{cand("unsplash", "u1", 2000, 1000)}}
+	b := &fakeProvider{name: "brave", err: errors.New("HTTP 429")}
+	got, err := Chain{u, b}.Search(context.Background(), "q", 1, 5)
+	if err != nil || ids(got) != "u1" {
+		t.Fatalf("got %s, %v", ids(got), err)
 	}
 }
 

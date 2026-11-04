@@ -15,12 +15,13 @@ import (
 
 // Candidate is one picture a provider offers for a search.
 type Candidate struct {
-	Provider  string // "openverse", "pexels" or "unsplash"
+	Provider  string // "openverse", "pexels", "unsplash" or "brave"
 	ID        string
 	Title     string
 	Creator   string
 	License   string // as shown, e.g. "CC BY 2.0"
 	SourceURL string // the picture's page, linked in the credit
+	Source    string // Brave only: the page's domain, shown in the credit
 	ImageURL  string // the full picture, downloaded for the cover
 	ThumbURL  string // a small preview for the picker
 	Width     int
@@ -41,6 +42,10 @@ const creditTitleMax = 40
 // Credit is the attribution line for the event description: title, creator,
 // licence and a link to the source.
 func (c Candidate) Credit() string {
+	if c.Provider == "brave" {
+		// An ordinary web image: say where it is from, claim no licence.
+		return CreditPrefix + strings.Join([]string{c.Source, c.SourceURL}, " · ")
+	}
 	var parts []string
 	title := strings.TrimSpace(c.Title)
 	if r := []rune(title); len(r) > creditTitleMax {
@@ -83,18 +88,21 @@ type UseTracker interface {
 	TrackUse(ctx context.Context, c Candidate) error
 }
 
-// Chain tries providers in order and returns the first non-empty result.
+// Chain asks providers in order until it has enough pictures.
 type Chain []Provider
 
-// NewChain puts the providers with an API key first and Openverse, which
-// needs none, last as the fallback.
-func NewChain(client *http.Client, pexelsKey, unsplashKey string) Chain {
+// NewChain puts the providers with an API key first (Pexels, Unsplash,
+// Brave) and Openverse, which needs none, last as the fallback.
+func NewChain(client *http.Client, pexelsKey, unsplashKey, braveKey string) Chain {
 	var c Chain
 	if pexelsKey != "" {
 		c = append(c, &Pexels{Key: pexelsKey, Client: client})
 	}
 	if unsplashKey != "" {
 		c = append(c, &Unsplash{Key: unsplashKey, Client: client})
+	}
+	if braveKey != "" {
+		c = append(c, &Brave{Key: braveKey, Client: client})
 	}
 	return append(c, &Openverse{Client: client})
 }
@@ -108,10 +116,18 @@ func (c Chain) Names() []string {
 	return names
 }
 
-// Search returns preferred pictures (landscape, ≥ 800 px wide) first.
+// Search fills perPage slots from the providers in order, skipping pictures
+// whose image URL was already taken. Within one provider, preferred pictures
+// (landscape, ≥ 800 px wide) come first. A provider that fails is skipped;
+// the error is returned only when nothing was found at all.
 func (c Chain) Search(ctx context.Context, query string, page, perPage int) ([]Candidate, error) {
 	var errs []error
+	var out []Candidate
+	seen := map[string]bool{}
 	for _, p := range c {
+		if len(out) >= perPage {
+			break
+		}
 		cands, err := p.Search(ctx, query, page, perPage)
 		if err != nil {
 			log.Printf("cover: %s search %q: %v", p.Name(), query, err)
@@ -119,15 +135,24 @@ func (c Chain) Search(ctx context.Context, query string, page, perPage int) ([]C
 			continue
 		}
 		cands = usable(cands)
-		if len(cands) == 0 {
-			continue
-		}
 		sort.SliceStable(cands, func(i, j int) bool {
 			return cands[i].Preferred() && !cands[j].Preferred()
 		})
-		return cands, nil
+		for _, cand := range cands {
+			if len(out) >= perPage {
+				break
+			}
+			if seen[cand.ImageURL] {
+				continue
+			}
+			seen[cand.ImageURL] = true
+			out = append(out, cand)
+		}
 	}
-	return nil, errors.Join(errs...)
+	if len(out) == 0 {
+		return nil, errors.Join(errs...)
+	}
+	return out, nil
 }
 
 // Tracker returns the provider that must hear about c being used, if any.

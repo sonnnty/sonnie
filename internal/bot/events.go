@@ -25,7 +25,7 @@ const imageHTTPTimeout = 15 * time.Second
 func newEvents(s *discordgo.Session, cfg config.EventsConfig) (*events.Handler, *events.Scheduler) {
 	client := &http.Client{Timeout: imageHTTPTimeout}
 	finder := &cover.Finder{
-		Providers: cover.NewChain(client, cfg.PexelsKey, cfg.UnsplashKey),
+		Providers: cover.NewChain(client, cfg.PexelsKey, cfg.UnsplashKey, cfg.BraveKey),
 		Client:    client,
 		Keywords:  newKeyworder(cfg.GoogleCredentialsFile),
 	}

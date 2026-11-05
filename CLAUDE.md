@@ -9,13 +9,19 @@ variables only).
 ## Rule: keep user manual and operations docs current
 
 The user manual lives inside the dashboard at `/docs` (Thai Markdown files in
-`docs/manual/`) and operational/maintainer reference is in `docs/operations.md`.
+`docs/manual/`) and operational/maintainer reference is in `docs/operations.md`
+(general, environment variables, dashboard, webhooks, releases) plus the
+per-feature files `docs/tts-operations.md`, `docs/tts-cost-and-persistence.md`
+and `docs/events-operations.md`. Do not use GitHub alert syntax (`> [!NOTE]`)
+in the manual: the renderer shows it literally (a test checks this); write
+`> **หมายเหตุ:** …` instead. Check every claim against the code.
 **When you change behaviour or add a feature, update the documentation in the same change:**
 
 1. **User-facing changes**: update or add the relevant chapter in `docs/manual/`
    in Thai (accurate to the code, friendly, keeping command/env names in English).
 2. **Configuration or operations**: update the environment reference and technical
-   details in `docs/operations.md`, and `.env.example`.
+   details in `docs/operations.md` (or the matching per-feature file), and
+   `.env.example`.
 3. **Repository summary**: if the high-level summary or essential setup changes,
    keep `README.md` up to date.
 4. **Dashboard panel**: register or adjust the feature's dashboard panel (see below).

@@ -82,6 +82,26 @@ func TestDocsStore_EveryFileRenders(t *testing.T) {
 	}
 }
 
+// GitHub alert syntax (> [!NOTE]) is not understood by the renderer and would
+// show as literal text; the manual uses plain blockquotes instead.
+func TestDocsStore_NoGitHubAlertSyntax(t *testing.T) {
+	ds, err := newDocsStore()
+	if err != nil {
+		t.Fatalf("newDocsStore: %v", err)
+	}
+	for _, item := range ds.items {
+		html, _, ok := ds.render(item.Slug)
+		if !ok {
+			t.Errorf("failed to render %s", item.Slug)
+			continue
+		}
+		if i := strings.Index(string(html), "[!"); i >= 0 {
+			end := min(len(html), i+40)
+			t.Errorf("%s: rendered page contains %q (GitHub alert syntax); use a plain blockquote such as `> **หมายเหตุ:** …`", item.Slug, string(html)[i:end])
+		}
+	}
+}
+
 func TestDocsStore_AliasesAndUnknown(t *testing.T) {
 	ds, err := newDocsStore()
 	if err != nil {

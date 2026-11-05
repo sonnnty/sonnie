@@ -671,8 +671,10 @@ land exactly on 100%. Each threshold fires once per month, also across restarts.
 
 **Persistence.** The deployment has no persistent volume, so the counter lives
 in Discord: the bot keeps one status message in the alert channel as an embed
-(no visible code block). The machine-readable marker is kept in the embed footer text
-after `อัปเดตอัตโนมัติ · อย่าลบข้อความนี้`:
+with no visible marker. The machine-readable marker is hidden in the embed URL
+(`https://sonnie.invalid/usage#<base64url>`; the embed has no title, so Discord
+does not show the URL; older messages had the marker in the footer and are
+still read):
 
 ```
 sonnie-tts-usage v2 month=2026-11 unit=chars value=12345 audio_ms=0 alerted=50,80
@@ -683,8 +685,8 @@ sonnie-tts-usage v2 month=2026-11 unit=thb_micro value=240000000 audio_ms=290000
 (`240000000` = ฿240.00). `audio_ms` is the audio generated this month.
 
 On startup the bot scans the channel's last 100 messages for the newest such
-message written by itself and restores the count from it (supporting both the
-embed footer marker and legacy plain-content markers, migrating old-format messages
+message written by itself and restores the count from it (supporting the URL
+marker, the older footer marker and legacy plain-content markers, migrating old-format messages
 to the embed format on startup). A marker from a different month, or in a different
 unit, means start at 0 (the reason is logged): the money meter starts at ฿0 when it
 finds an old `v1` (characters) marker or a `unit=chars` one, e.g. right after

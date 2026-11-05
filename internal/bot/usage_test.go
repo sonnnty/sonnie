@@ -75,7 +75,8 @@ func TestDiscordUsageChannel_FindStatusPicksNewestOwnEmbedMarker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != newerEmbed.Footer.Text || isLegacy || api.gotLimit != 100 {
+	want, _ := usage.MarkerFromURL(newerEmbed.URL)
+	if got != want || isLegacy || api.gotLimit != 100 {
 		t.Fatalf("got %q isLegacy=%v (limit %d)", got, isLegacy, api.gotLimit)
 	}
 

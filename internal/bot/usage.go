@@ -63,9 +63,21 @@ func (c *discordUsageChannel) FindStatus(context.Context) (string, bool, error) 
 		if m == nil || m.Author == nil || botID == "" || m.Author.ID != botID {
 			continue
 		}
-		// Check embeds first (new format: marker in footer text).
+		// Check embeds first: marker in the hidden URL (current format), then
+		// in the footer text (older messages).
 		for _, e := range m.Embeds {
-			if e != nil && e.Footer != nil && e.Footer.Text != "" {
+			if e == nil {
+				continue
+			}
+			if text, ok := usage.MarkerFromURL(e.URL); ok {
+				if _, ok := usage.ParseMarker(text); ok {
+					c.mu.Lock()
+					c.messageID = m.ID
+					c.mu.Unlock()
+					return text, false, nil
+				}
+			}
+			if e.Footer != nil && e.Footer.Text != "" {
 				if _, ok := usage.ParseMarker(e.Footer.Text); ok {
 					c.mu.Lock()
 					c.messageID = m.ID

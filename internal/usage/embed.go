@@ -1,6 +1,7 @@
 package usage
 
 import (
+	"encoding/base64"
 	"fmt"
 	"strings"
 	"time"
@@ -194,13 +195,9 @@ func FormatUsageEmbed(snap Snapshot, now time.Time) *discordgo.MessageEmbed {
 
 // FormatStatusEmbed builds the persistent status embed.
 //
-// Marker placement:
-// We place the machine-readable marker on the second line of the embed footer
-// text, after "อัปเดตอัตโนมัติ · อย่าลบข้อความนี้". In Discord, footer text is rendered
-// in a small, muted secondary font at the very bottom of the embed, which makes it
-// far less visible and obtrusive than an embed field (which has prominent bold titles
-// and full-size text). It avoids any visible code block while staying completely
-// reliable to parse on startup.
+// Marker placement: the machine-readable marker is hidden in the embed URL
+// (MarkerURL). Discord keeps the URL of a title-less embed but does not show
+// it. Older status messages had the marker in the footer; they are still read.
 func FormatStatusEmbed(st State, limit int64, now time.Time) *discordgo.MessageEmbed {
 	percent := 0
 	if limit > 0 {
@@ -220,9 +217,12 @@ func FormatStatusEmbed(st State, limit int64, now time.Time) *discordgo.MessageE
 		AudioMs: st.AudioMs,
 	}
 	embed := FormatUsageEmbed(snap, now)
-	embed.Footer = &discordgo.MessageEmbedFooter{
-		Text: fmt.Sprintf("%s\n%s", StatusFooterHuman, FormatMarker(st)),
-	}
+	// The title moves into the description: an embed without a title never
+	// shows its URL, which carries the marker out of sight.
+	embed.Description = "### " + embed.Title + "\n" + embed.Description
+	embed.Title = ""
+	embed.URL = MarkerURL(st)
+	embed.Footer = &discordgo.MessageEmbedFooter{Text: StatusFooterHuman}
 	embed.Timestamp = now.Format(time.RFC3339)
 	return embed
 }
@@ -232,6 +232,11 @@ func FormatStatusEmbed(st State, limit int64, now time.Time) *discordgo.MessageE
 func ParseMarkerFromEmbed(embed *discordgo.MessageEmbed) (State, bool) {
 	if embed == nil {
 		return State{}, false
+	}
+	if text, ok := MarkerFromURL(embed.URL); ok {
+		if s, ok := ParseMarker(text); ok {
+			return s, true
+		}
 	}
 	if embed.Footer != nil && embed.Footer.Text != "" {
 		if s, ok := ParseMarker(embed.Footer.Text); ok {
@@ -287,4 +292,25 @@ func FormatAlertEmbed(mode Mode, threshold int, used, limit int64, month string)
 		Description: desc,
 		Color:       EmbedColor(percent),
 	}
+}
+
+// markerURLPrefix starts the embed URL that carries the status marker.
+const markerURLPrefix = "https://sonnie.invalid/usage#"
+
+// MarkerURL hides the marker of st in an embed URL, base64url-encoded.
+func MarkerURL(st State) string {
+	return markerURLPrefix + base64.RawURLEncoding.EncodeToString([]byte(FormatMarker(st)))
+}
+
+// MarkerFromURL returns the marker text hidden in u by MarkerURL.
+func MarkerFromURL(u string) (string, bool) {
+	enc, ok := strings.CutPrefix(u, markerURLPrefix)
+	if !ok {
+		return "", false
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(enc)
+	if err != nil {
+		return "", false
+	}
+	return string(raw), true
 }

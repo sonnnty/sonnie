@@ -46,7 +46,9 @@ func (c *fakeChannel) SaveStatus(_ context.Context, embed *discordgo.MessageEmbe
 	if c.saveErr != nil {
 		return c.saveErr
 	}
-	c.status = embed.Footer.Text
+	// Like Discord: the footer is read back together with the marker hidden in the URL.
+	marker, _ := MarkerFromURL(embed.URL)
+	c.status = embed.Footer.Text + "\n" + marker
 	c.isLegacy = false
 	c.saves = append(c.saves, embed)
 	return nil

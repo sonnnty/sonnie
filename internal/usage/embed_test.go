@@ -1,6 +1,7 @@
 package usage
 
 import (
+	"github.com/bwmarrin/discordgo"
 	"reflect"
 	"strings"
 	"testing"
@@ -261,5 +262,25 @@ func TestAlertMessages(t *testing.T) {
 	a100 := FormatAlertEmbed(ModeMoney, 100, 300000000, 300000000, "2026-11")
 	if a100.Color != ColorRed {
 		t.Errorf("a100 color = %#x, want %#x", a100.Color, ColorRed)
+	}
+}
+
+func TestFormatStatusEmbed_MarkerHiddenInURL(t *testing.T) {
+	st := State{Month: "2026-11", Unit: UnitTHBMicro, Value: 4464032, AudioMs: 519876}
+	e := FormatStatusEmbed(st, 300_000_000, time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC))
+	if e.Title != "" || !strings.HasPrefix(e.Description, "### "+FormatTitle("2026-11")+"\n") {
+		t.Fatalf("title %q description %q", e.Title, e.Description)
+	}
+	if e.Footer.Text != StatusFooterHuman || strings.Contains(e.Description, "sonnie-tts-usage") {
+		t.Fatalf("marker visible: footer %q", e.Footer.Text)
+	}
+	got, ok := ParseMarkerFromEmbed(e)
+	if !ok || got.Value != st.Value || got.AudioMs != st.AudioMs || got.Month != st.Month {
+		t.Fatalf("marker %+v ok=%v", got, ok)
+	}
+	// Status messages from before keep the marker in the footer and are still read.
+	old := &discordgo.MessageEmbed{Footer: &discordgo.MessageEmbedFooter{Text: StatusFooterHuman + "\n" + FormatMarker(st)}}
+	if got, ok := ParseMarkerFromEmbed(old); !ok || got.Value != st.Value {
+		t.Fatalf("old marker %+v ok=%v", got, ok)
 	}
 }

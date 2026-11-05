@@ -17,11 +17,13 @@ A general-purpose Discord bot written in Go, grown one command at a time.
 ## Run with Docker
 
 The image is a static Go binary on a non-root distroless base. It reads its
-configuration from environment variables only and listens on no port.
+configuration from environment variables only. Its one inbound port is the
+HTTP server on 8080 (dashboard, webhooks, `/healthz`; see
+[Dashboard & webhooks](#dashboard--webhooks)).
 
 ```bash
-docker build -t sonnie .
-docker run --rm --env-file .env sonnie
+docker build --build-arg VERSION=$(git rev-parse --short HEAD) -t sonnie .
+docker run --rm --env-file .env -p 8080:8080 sonnie
 ```
 
 `.env` is excluded from the build context (see `.dockerignore`), so the token
@@ -42,6 +44,22 @@ setter that the bot calls once at startup (see `SetTTS` in `tts.go`).
 A command can also answer autocomplete (`Command.Autocomplete`) and its own
 buttons (`Command.Component`, for custom IDs starting with
 `ComponentPrefix`); see `event.go`.
+
+## Adding a feature: register a dashboard panel
+
+Every feature shows its state on the dashboard as one panel. When you add
+a feature:
+
+1. Give it a cheap, read-only status method (an in-memory snapshot; never a
+   Discord call), like `readaloud.Manager.Status` or `events.Scheduler.Status`.
+2. Write a panel constructor in `internal/panels/` that takes that status
+   behind a small interface and returns a `dashboard.Panel{ID, Title,
+   Snapshot}` whose snapshot is a JSON-ready struct. Test it with a fake.
+3. Append it in `dashboardPanels` in `internal/bot/dashboard.go`.
+4. Optionally add a renderer under the same ID in
+   `internal/dashboard/static/app.js`. Without one the panel is shown as
+   plain JSON, so it works before it looks nice. Build DOM with
+   `textContent` only (the `el()` helper), never `innerHTML`.
 
 ## Server events (`/event`)
 
@@ -731,3 +749,129 @@ streaming, so an egress proxy or firewall must allow HTTP/2 there).
 Google Cloud TTS returns 48 kHz Ogg/Opus directly and SONNIE demuxes it in
 pure Go, so neither cgo nor `ffmpeg` is needed at runtime and the container
 image remains `distroless/static`.
+
+## Dashboard & webhooks
+
+The bot runs a small HTTP server (`DASHBOARD_ADDR`, default `:8080`) with:
+
+- **`GET /healthz`**: `ok` (200) while the Discord gateway is connected,
+  503 otherwise. No login. For Kubernetes liveness/readiness probes.
+- **The dashboard** at `/`: a read-only monitoring page behind Discord
+  login, in Thai, light/dark aware and usable on a phone. It refreshes
+  every 5 seconds and has one panel per feature: the bot (online, gateway
+  ping, uptime, version, guilds, goroutines and memory), read-aloud
+  sessions (voice channel, text channels, participants with their channel
+  and voice, start, queue, messages read and deleted), the Google TTS
+  budget (as in the Discord usage embed, plus recent time-to-first-audio),
+  events (upcoming events, pending reminders, the auto start/end
+  scheduler, cover providers and Brave's pause), webhooks (hooks and their
+  recent calls) and the last 300 log lines with a filter box.
+- **`POST /hooks/{name}`**: a generic incoming webhook that posts to a
+  Discord channel.
+
+It works over plain HTTP on a LAN address (for example a Kubernetes
+NodePort). Set `DASHBOARD_ADDR=` (empty) or `off` to turn the server off.
+
+### Who can see the dashboard
+
+A Discord user can see it when they are listed in `DASHBOARD_ALLOWED_USERS`,
+**or** when they own, or have **Administrator** or **Manage Server** in, a
+server the bot is in. `DASHBOARD_GUILD_ID` limits this to one server, and
+`DASHBOARD_ROLE_IDS` (comma-separated, needs `DASHBOARD_GUILD_ID`) replaces
+the Administrator/Manage Server rule: members of that server with any one of
+those roles get in (production: role TABP in the TAPB server). The bot checks with its own token (guild roles from
+the gateway, the user's roles over REST), never the user's token. Anyone
+else gets a polite 403 page in Thai. The check is redone at most every 10
+minutes per user, so losing the role takes effect within 10 minutes.
+
+### Setting up login
+
+1. In the [Developer Portal](https://discord.com/developers/applications),
+   open the bot's application → **OAuth2**.
+2. Copy the **Client Secret** (Reset Secret if you never saved it) into
+   `DISCORD_CLIENT_SECRET`. The **Client ID** on the same page is the
+   default `DISCORD_CLIENT_ID`; you only need to set it if it differs from
+   the bot's application.
+3. Under **Redirects**, add `<DASHBOARD_PUBLIC_URL>/auth/callback`, e.g.
+   `http://10.10.5.35:31120/auth/callback`, and save. It must match exactly
+   (scheme, address, port). The bot logs the URI it uses at startup.
+4. Set `DASHBOARD_PUBLIC_URL` to the address browsers use to reach the
+   server, and `DASHBOARD_SESSION_KEY` to a random secret of at least 32
+   bytes:
+
+   ```bash
+   openssl rand -base64 48
+   ```
+
+The login asks only for the `identify` scope. The session is an encrypted
+and signed cookie (AES-256-GCM): `HttpOnly`, `SameSite=Lax`, `Secure` when
+the public URL is https, and valid for 7 days. Changing the session key
+logs everyone out. `/auth/logout` logs you out.
+
+Without the three login settings the dashboard page says what is missing.
+`/healthz` and the webhooks still work. Setting only some of them stops the
+bot at startup with an error.
+
+### Webhooks
+
+`WEBHOOKS` (a secret) lists the hooks, comma-separated, as
+`name=token@channelID`:
+
+```
+WEBHOOKS=grafana=7f3c…long-random…@123456789012345678,ci=9a1e…@123456789012345679
+```
+
+Names are lowercase letters, digits, `-` and `_`. Tokens are at least 16
+characters (`openssl rand -hex 24`). The bot needs **View Channel** and
+**Send Messages** (and **Embed Links** for embeds) in each channel.
+
+Call a hook with its token in `Authorization: Bearer <token>` or
+`X-Sonnie-Token: <token>`:
+
+```bash
+# simple form: becomes one embed
+curl -X POST http://10.10.5.35:31120/hooks/grafana \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"title":"CPU สูง","text":"node1 95%","color":"#ff8800","url":"https://grafana.example/d/abc"}'
+
+# Discord-webhook-like
+curl -X POST http://10.10.5.35:31120/hooks/ci \
+  -H "X-Sonnie-Token: $TOKEN" -H "Content-Type: application/json" \
+  -d '{"content":"build ok","embeds":[{"title":"main @ 1a2b3c","color":5763719}]}'
+
+# plain text
+curl -X POST http://10.10.5.35:31120/hooks/ci -H "X-Sonnie-Token: $TOKEN" \
+  -H "Content-Type: text/plain" --data 'deploy finished'
+```
+
+- Success is `200 {"ok":true,"message_id":"…","channel_id":"…"}`.
+- An unknown hook and a wrong token both answer `401`, so the answer never
+  says which hooks exist.
+- Body at most 64 KB (`413`). At most 30 calls per minute per hook (`429`
+  with `Retry-After`). Bad JSON or nothing to post gives `400`, another
+  content type `415`, and Discord refusing the message `502`.
+- Embeds are rebuilt from the known fields and cut to Discord's limits:
+  10 embeds, 6000 characters in total, http(s) URLs only.
+- **Nothing pings anyone**: messages are sent with
+  `allowed_mentions: {parse: []}`, so `@everyone`, roles and users stay
+  plain text.
+- Each call (time, hook, status, source IP, size; never the token or body)
+  is listed on the dashboard's Webhooks panel.
+
+### Settings
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `DASHBOARD_ADDR` | `:8080` | Listen address; empty or `off` turns the HTTP server off |
+| `DASHBOARD_PUBLIC_URL` | – | Browser-facing URL, e.g. `http://10.10.5.35:31120`; the redirect URI is this + `/auth/callback` |
+| `DISCORD_CLIENT_ID` | bot's application ID | OAuth2 client ID |
+| `DISCORD_CLIENT_SECRET` | – | OAuth2 client secret (**secret**) |
+| `DASHBOARD_SESSION_KEY` | – | ≥ 32 random bytes that seal the session cookie (**secret**) |
+| `DASHBOARD_GUILD_ID` | – | Only members of this server may log in |
+| `DASHBOARD_ROLE_IDS` | – | Members of `DASHBOARD_GUILD_ID` with one of these roles get in (instead of Administrator/Manage Server) |
+| `DASHBOARD_ALLOWED_USERS` | – | Comma-separated user IDs always allowed in |
+| `WEBHOOKS` | – | `name=token@channelID,…` (**secret**) |
+
+The log panel shows the bot's own log, the same lines as `kubectl logs`.
+The bot never logs its token or keys. As a second line of defence, every
+configured secret is replaced with `[redacted]` in the dashboard's copy.

@@ -200,3 +200,9 @@ func (b *Brave) pause(until time.Time) {
 		b.Notify.BraveQuotaExhausted(until)
 	}
 }
+
+// PausedUntil reports the end of the current pause, or false when Brave is
+// in use.
+func (b *Brave) PausedUntil() (time.Time, bool) {
+	return b.pausedUntil()
+}

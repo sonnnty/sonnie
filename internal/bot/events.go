@@ -22,7 +22,8 @@ const imageHTTPTimeout = 15 * time.Second
 // newEvents builds /event: the cover finder (Brave, Unsplash and Pexels
 // when they have a key, then Openverse; Gemini keywords when a service
 // account is set) and the scheduler for reminders and automatic start/end.
-func newEvents(s *discordgo.Session, cfg config.EventsConfig) (*events.Handler, *events.Scheduler) {
+// The provider chain is returned for the dashboard.
+func newEvents(s *discordgo.Session, cfg config.EventsConfig) (*events.Handler, *events.Scheduler, cover.Chain) {
 	client := &http.Client{Timeout: imageHTTPTimeout}
 	fallback := "Openverse"
 	if cfg.UnsplashKey != "" {
@@ -49,7 +50,7 @@ func newEvents(s *discordgo.Session, cfg config.EventsConfig) (*events.Handler, 
 		strings.Join(finder.Providers.Names(), " → "), finder.Keywords != nil, remind, cfg.AutoStart)
 	h := events.NewHandler(s, sched, finder, nil)
 	h.SetVoiceChannel(func(guildID, userID string) string { return voiceChannelOf(s.State, guildID, userID) })
-	return h, sched
+	return h, sched, finder.Providers
 }
 
 // voiceChannelOf is the voice channel userID is in, from the gateway
@@ -111,6 +112,14 @@ func (b *Bot) handleScheduledEventCreate(_ *discordgo.Session, e *discordgo.Guil
 
 func (b *Bot) handleScheduledEventUpdate(_ *discordgo.Session, e *discordgo.GuildScheduledEventUpdate) {
 	b.eventSched.Upsert(e.GuildScheduledEvent)
+}
+
+func (b *Bot) handleScheduledEventUserAdd(_ *discordgo.Session, e *discordgo.GuildScheduledEventUserAdd) {
+	b.eventSched.AdjustInterested(e.GuildScheduledEventID, 1)
+}
+
+func (b *Bot) handleScheduledEventUserRemove(_ *discordgo.Session, e *discordgo.GuildScheduledEventUserRemove) {
+	b.eventSched.AdjustInterested(e.GuildScheduledEventID, -1)
 }
 
 func (b *Bot) handleScheduledEventDelete(_ *discordgo.Session, e *discordgo.GuildScheduledEventDelete) {

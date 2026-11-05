@@ -125,6 +125,9 @@ type Snapshot struct {
 	Percent int   // 0 when there is no cap, otherwise rounded down and at most 100
 	Paused  bool  // the cap is reached and reading is paused until next month
 	AudioMs int64 // audio generated this month; only metered in ModeMoney
+	// Alerted are the thresholds (see Thresholds) already announced this
+	// month, ascending.
+	Alerted []int
 }
 
 // Meter wraps a tts.Synthesizer, counting what it costs: characters or money,
@@ -465,6 +468,12 @@ func (m *Meter) Snapshot() Snapshot {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.rolloverLocked()
+	var alerted []int
+	for _, th := range Thresholds {
+		if m.alerted[th] {
+			alerted = append(alerted, th)
+		}
+	}
 	return Snapshot{
 		Month:   m.month,
 		Unit:    m.cfg.Mode.Unit(),
@@ -473,6 +482,7 @@ func (m *Meter) Snapshot() Snapshot {
 		Limit:   m.cfg.Limit,
 		Percent: m.percentLocked(),
 		Paused:  m.cfg.Limit > 0 && (m.refused || m.used >= m.cfg.Limit),
+		Alerted: alerted,
 	}
 }
 

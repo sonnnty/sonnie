@@ -3,15 +3,21 @@ package bot
 import (
 	"context"
 	"log"
+	"sync/atomic"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 
 	"github.com/Sonty15/SONNIE/internal/commands"
 	"github.com/Sonty15/SONNIE/internal/config"
+	"github.com/Sonty15/SONNIE/internal/cover"
+	"github.com/Sonty15/SONNIE/internal/dashboard"
 	"github.com/Sonty15/SONNIE/internal/events"
+	"github.com/Sonty15/SONNIE/internal/logring"
 	"github.com/Sonty15/SONNIE/internal/modal"
 	"github.com/Sonty15/SONNIE/internal/readaloud"
 	"github.com/Sonty15/SONNIE/internal/usage"
+	"github.com/Sonty15/SONNIE/internal/webhook"
 )
 
 type Bot struct {
@@ -26,20 +32,35 @@ type Bot struct {
 	// stops its loop.
 	eventSched *events.Scheduler
 	stopEvents context.CancelFunc
+	// covers is the cover provider chain, for the dashboard.
+	covers cover.Chain
+
+	// dash is the HTTP server (dashboard, /healthz, webhooks); nil when
+	// DASHBOARD_ADDR is empty. hooks is nil without WEBHOOKS.
+	dash  *dashboard.Server
+	hooks *webhook.Handler
+	// logs holds the recent log lines; nil in tests.
+	logs *logring.Ring
+
+	started   time.Time
+	connected atomic.Bool  // the gateway is connected (Ready/Resumed until Disconnect)
+	appID     atomic.Value // string: the application ID from Ready
 }
 
-func New(cfg config.Config) (*Bot, error) {
+// New builds the bot. logs, which may be nil, is the ring the standard
+// logger is teed into; the dashboard shows it.
+func New(cfg config.Config, logs *logring.Ring) (*Bot, error) {
 	session, err := discordgo.New("Bot " + cfg.DiscordToken)
 	if err != nil {
 		return nil, err
 	}
-	b := &Bot{Session: session}
+	b := &Bot{Session: session, logs: logs, started: time.Now()}
 
 	// Scheduled events (/event). Not privileged, and already in discordgo's
 	// default intents; set explicitly because the feature depends on it.
 	session.Identify.Intents |= discordgo.IntentsGuildScheduledEvents
 	var eventHandler *events.Handler
-	eventHandler, b.eventSched = newEvents(session, cfg.Events)
+	eventHandler, b.eventSched, b.covers = newEvents(session, cfg.Events)
 	commands.SetEvents(eventHandler)
 
 	if cfg.TTS.Enabled {
@@ -56,10 +77,20 @@ func New(cfg config.Config) (*Bot, error) {
 		}
 	}
 
+	// Last, so the panels see every feature.
+	if b.dash, err = b.newDashboard(cfg); err != nil {
+		return nil, err
+	}
+
 	return b, nil
 }
 
 func (b *Bot) Open() error {
+	b.Session.AddHandler(b.handleReady)
+	b.Session.AddHandler(b.handleResumed)
+	b.Session.AddHandler(b.handleDisconnect)
+	b.Session.AddHandler(b.handleScheduledEventUserAdd)
+	b.Session.AddHandler(b.handleScheduledEventUserRemove)
 	b.Session.AddHandler(handleInteraction)
 	b.Session.AddHandler(handleModalSubmit)
 	b.Session.AddHandler(b.handleEventsGuildCreate)
@@ -72,6 +103,9 @@ func (b *Bot) Open() error {
 		b.Session.AddHandler(b.handleGuildCreate)
 	}
 
+	if err := b.startDashboard(); err != nil {
+		return err
+	}
 	if err := b.Session.Open(); err != nil {
 		return err
 	}
@@ -140,6 +174,8 @@ func (b *Bot) registerCommands() error {
 }
 
 func (b *Bot) Close() error {
+	// First, so no webhook posts into a closing session.
+	b.stopDashboard()
 	if b.stopEvents != nil {
 		b.stopEvents()
 	}

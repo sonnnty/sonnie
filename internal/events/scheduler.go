@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -58,6 +59,8 @@ type Scheduler struct {
 	// creators remembers who ran /event create, since Discord records the
 	// bot as the creator. It is lost on restart.
 	creators map[string]string
+
+	running atomic.Bool // Run is looping
 }
 
 type tracked struct {
@@ -112,6 +115,12 @@ func (s *Scheduler) Upsert(ev *discordgo.GuildScheduledEvent) {
 	}
 	cp := *ev
 	t, ok := s.events[ev.ID]
+	if ok && cp.UserCount == 0 {
+		// Only the startup list asks Discord for the interested count;
+		// gateway updates and edit replies leave it out. Keep the count
+		// (adjusted by AdjustInterested) rather than drop it to zero.
+		cp.UserCount = t.ev.UserCount
+	}
 	if !ok {
 		t = &tracked{}
 		s.events[ev.ID] = t
@@ -162,7 +171,7 @@ func (s *Scheduler) Sync(guildID string, list []*discordgo.GuildScheduledEvent) 
 
 // LoadGuild reads a guild's events from Discord and syncs them.
 func (s *Scheduler) LoadGuild(guildID string) error {
-	list, err := s.cfg.API.GuildScheduledEvents(guildID, false)
+	list, err := s.cfg.API.GuildScheduledEvents(guildID, true)
 	if err != nil {
 		return fmt.Errorf("events: list guild %s: %w", guildID, err)
 	}
@@ -209,6 +218,8 @@ func (s *Scheduler) Creator(ev *discordgo.GuildScheduledEvent) string {
 
 // Run performs due actions until ctx is done.
 func (s *Scheduler) Run(ctx context.Context) {
+	s.running.Store(true)
+	defer s.running.Store(false)
 	for {
 		next := s.RunDue(ctx)
 		wait := maxWait

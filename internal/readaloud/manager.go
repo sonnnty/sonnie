@@ -129,6 +129,8 @@ type session struct {
 	// ID. Once ended is set (the session is over), none may be added.
 	pending map[string]Timer
 	ended   bool
+	// spoken counts the messages read aloud to the end, for the dashboard.
+	spoken int
 }
 
 // card is a session message the bot posted in a text channel.
@@ -617,7 +619,12 @@ func (m *Manager) HandleMessage(msg Message, names Names) bool {
 	// Spoken, dropped from a full queue or failed: in every case the player is
 	// done with the message, which is when its delay starts. A message cut off
 	// by the end of the session is left to the end-of-session clean-up.
-	player.EnqueueVoice(Utterance(msg.AuthorName, text, m.cfg.SpeakAuthor), speakerVoice, func(bool) {
+	player.EnqueueVoice(Utterance(msg.AuthorName, text, m.cfg.SpeakAuthor), speakerVoice, func(spoken bool) {
+		if spoken {
+			m.mu.Lock()
+			s.spoken++
+			m.mu.Unlock()
+		}
 		m.scheduleDelete(s, msg.ChannelID, msg.MessageID)
 	})
 	return true

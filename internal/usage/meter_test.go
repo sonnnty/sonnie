@@ -500,3 +500,16 @@ func TestMeter_ConcurrentUse(t *testing.T) {
 	}
 	m.Close()
 }
+
+func TestMeter_SnapshotListsAlertedThresholds(t *testing.T) {
+	m := New(Config{Inner: &tts.Fake{}, Limit: 100, Now: newClock().Now})
+	if got := m.Snapshot().Alerted; len(got) != 0 {
+		t.Fatalf("fresh meter alerted %v", got)
+	}
+	if _, err := m.Synthesize(context.Background(), text(85), "th"); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.Snapshot().Alerted; len(got) != 2 || got[0] != 50 || got[1] != 80 {
+		t.Fatalf("alerted %v, want [50 80]", got)
+	}
+}

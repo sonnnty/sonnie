@@ -26,3 +26,6 @@ func formatInt(n int64) string {
 	}
 	return string(out)
 }
+
+// FormatCount formats n with thousands separators, e.g. "1,234,567".
+func FormatCount(n int64) string { return formatInt(n) }

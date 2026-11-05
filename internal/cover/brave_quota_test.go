@@ -296,3 +296,20 @@ func TestChain_PausedProviderIsSkippedQuietly(t *testing.T) {
 		t.Errorf("only a paused provider: %v, %v", got, err)
 	}
 }
+
+func TestChain_StatusShowsBravePause(t *testing.T) {
+	qs := newQuotaServer(t, 402, monthHeaders("0, 0", "1, 3600"))
+	clock := &fakeClock{t: t0}
+	b := newTestBrave(qs, clock, nil)
+	c := Chain{b, &Openverse{}}
+
+	st := c.Status()
+	if len(st) != 2 || st[0].Name != "brave" || st[1].Name != "openverse" || !st[0].PausedUntil.IsZero() {
+		t.Fatalf("before the pause: %+v", st)
+	}
+	b.Search(context.Background(), "q", 1, 5)
+	st = c.Status()
+	if want := t0.Add(time.Hour); !st[0].PausedUntil.Equal(want) || !st[1].PausedUntil.IsZero() {
+		t.Fatalf("paused status %+v, want brave until %s", st, want)
+	}
+}

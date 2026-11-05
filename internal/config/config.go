@@ -15,6 +15,9 @@ type Config struct {
 	DiscordToken string
 	TTS          TTSConfig
 	Events       EventsConfig
+	Dashboard    DashboardConfig
+	// Webhooks (WEBHOOKS, a secret) are the generic webhook endpoints.
+	Webhooks []WebhookConfig
 }
 
 // EventsConfig holds the settings for /event (Discord Scheduled Events).
@@ -117,7 +120,23 @@ const (
 	defaultTTSMonthlyCharLimit = 1000000
 )
 
+// Load reads the configuration through getenv, which cannot tell an unset
+// variable from an empty one: both mean the default. Use LoadEnv with
+// os.LookupEnv where that difference matters (DASHBOARD_ADDR="" turns the
+// HTTP server off).
 func Load(getenv func(string) string) (Config, error) {
+	return LoadEnv(func(key string) (string, bool) {
+		v := getenv(key)
+		return v, v != ""
+	})
+}
+
+// LoadEnv is Load with a lookup like os.LookupEnv.
+func LoadEnv(lookup func(string) (string, bool)) (Config, error) {
+	getenv := func(key string) string {
+		v, _ := lookup(key)
+		return v
+	}
 	token := getenv("DISCORD_BOT_TOKEN")
 	if token == "" {
 		return Config{}, errors.New("DISCORD_BOT_TOKEN is not set")
@@ -133,7 +152,17 @@ func Load(getenv func(string) string) (Config, error) {
 		return Config{}, err
 	}
 
-	return Config{DiscordToken: token, TTS: tts, Events: events}, nil
+	dashboard, err := loadDashboard(lookup)
+	if err != nil {
+		return Config{}, err
+	}
+
+	webhooks, err := parseWebhooks(getenv("WEBHOOKS"))
+	if err != nil {
+		return Config{}, err
+	}
+
+	return Config{DiscordToken: token, TTS: tts, Events: events, Dashboard: dashboard, Webhooks: webhooks}, nil
 }
 
 func loadEvents(getenv func(string) string, alertChannelID string) (EventsConfig, error) {

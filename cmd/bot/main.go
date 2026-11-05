@@ -15,7 +15,7 @@ import (
 func main() {
 	_ = godotenv.Load()
 
-	cfg, err := config.Load(os.Getenv)
+	cfg, err := config.LoadEnv(os.LookupEnv)
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}

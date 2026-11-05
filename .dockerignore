@@ -14,9 +14,6 @@
 .ha-plan
 .venv/
 
-# Internal docs
-docs/
-
 # Build artifacts
 bin/
 *.exe

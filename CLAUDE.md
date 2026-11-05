@@ -6,6 +6,26 @@ distroless and runs as a single replica. Read `README.md` and
 `internal/bot`, and settings are in `internal/config` (environment
 variables only).
 
+## Rule: keep user manual and operations docs current
+
+The user manual lives inside the dashboard at `/docs` (Thai Markdown files in
+`docs/manual/`) and operational/maintainer reference is in `docs/operations.md`
+(general, environment variables, dashboard, webhooks, releases) plus the
+per-feature files `docs/tts-operations.md`, `docs/tts-cost-and-persistence.md`
+and `docs/events-operations.md`. Do not use GitHub alert syntax (`> [!NOTE]`)
+in the manual: the renderer shows it literally (a test checks this); write
+`> **หมายเหตุ:** …` instead. Check every claim against the code.
+**When you change behaviour or add a feature, update the documentation in the same change:**
+
+1. **User-facing changes**: update or add the relevant chapter in `docs/manual/`
+   in Thai (accurate to the code, friendly, keeping command/env names in English).
+2. **Configuration or operations**: update the environment reference and technical
+   details in `docs/operations.md` (or the matching per-feature file), and
+   `.env.example`.
+3. **Repository summary**: if the high-level summary or essential setup changes,
+   keep `README.md` up to date.
+4. **Dashboard panel**: register or adjust the feature's dashboard panel (see below).
+
 ## Rule: every feature registers a dashboard panel
 
 The bot has a read-only web dashboard (`internal/dashboard`). **When you
@@ -39,8 +59,8 @@ The dashboard stays read-only unless the owner asks for actions.
   also redacts them (`redactSecrets` in `internal/bot/dashboard.go`): add
   any new secret there.
 - Discord-facing text is Thai; code, comments and logs are English.
-- New settings go in `internal/config` with tests, in `.env.example` and in
-  the README.
+- New settings go in `internal/config` with tests, in `.env.example`,
+  in `docs/operations.md` and in the README when essential.
 - Kubernetes manifests live in a separate repo (homelab-ops), not here.
 - Releases use semantic versions: git tag `vX.Y.Z` on `main`, image
   `rg.tapb.ch/sonnie:X.Y.Z` built with `--build-arg VERSION=X.Y.Z` (shown on

@@ -1,7 +1,7 @@
 # Concept: Discord Scheduled Events
 
-Status: **implemented** (2026-11-03); see the README section "Server events
-(`/event`)" for how it works and [Deviations](#as-built-deviations) below.
+Status: **implemented** (2026-11-03); see [events-operations.md](events-operations.md)
+for how it works and [Deviations](#as-built-deviations) below.
 Separate from TTS: the bot does not join voice or read chat for events.
 
 ## Goal

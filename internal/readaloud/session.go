@@ -610,7 +610,7 @@ func sessionEmbed(v sessionView, channelID string) *discordgo.MessageEmbed {
 	}
 	return &discordgo.MessageEmbed{
 		URL: markerURL(v.marker(true)),
-		Description: fmt.Sprintf("🔈 <#%s> · <t:%d:R>\n👥 %s",
+		Description: fmt.Sprintf("### 🔈 <#%s> · <t:%d:R>\n👥 %s",
 			v.VoiceChannelID, v.Started.Unix(), participantLines(v)),
 		Color:     color,
 		Footer:    footer("/tts join เพื่อให้อ่าน · /tts leave เพื่อออก · " + deletion),

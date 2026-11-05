@@ -238,7 +238,7 @@ session.
    naming the voice assigned to you (e.g. `✅ เข้าร่วมแล้ว — … · เสียง Puck`).
 
    ```
-   🔈 #ห้องเสียง · 3 นาทีที่แล้ว
+   ### 🔈 #ห้องเสียง · 3 นาทีที่แล้ว   (heading: larger, with space below)
    👥 @a 🎙️Puck, @b 🎙️Orus · #general
    @c 🎙️Charon · #games
    /tts join เพื่อให้อ่าน · /tts leave เพื่อออก · ลบข้อความหลังอ่าน

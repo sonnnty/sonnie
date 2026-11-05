@@ -175,7 +175,7 @@ func TestSessionEmbed(t *testing.T) {
 	if e.Title != "" {
 		t.Errorf("title %q: the card has no title, so its marker URL stays hidden", e.Title)
 	}
-	wantDesc := "🔈 <#v1> · <t:1793000000:R>\n👥 <@1> 🎙️Puck, <@3> 🎙️Charon · <#t1>\n<@2> 🎙️Orus · <#t2>"
+	wantDesc := "### 🔈 <#v1> · <t:1793000000:R>\n👥 <@1> 🎙️Puck, <@3> 🎙️Charon · <#t1>\n<@2> 🎙️Orus · <#t2>"
 	if e.Description != wantDesc {
 		t.Errorf("description %q, want %q", e.Description, wantDesc)
 	}

@@ -220,75 +220,91 @@ Wikimedia and others for Openverse).
 ## Read chat aloud (`/tts`)
 
 Reading aloud is **opt-in per person** and lives in a **session**. `/tts join`
-(run in the text channel you want read, while you are in a voice channel) joins
-the session: from then on the bot reads **your** messages in that channel
-aloud in the voice channel, and nobody else's. `/tts leave` takes you out
-again. `/tts usage` shows this month's Google TTS usage, in characters or baht
-(see [Usage cap and alerts](#usage-cap-and-alerts)). Each server has at most
-one session.
+(run in any text channel, while you are in a voice channel) joins the session:
+from then on the bot reads **your** messages **in the channel where you ran
+it** aloud in the voice channel, and nobody else's. Every participant picks
+their own channel, so a session can read several text channels at once, but the
+voice channel is one per server (Discord allows a single voice connection per
+bot per server). `/tts leave` takes you out again. `/tts usage` shows this
+month's Google TTS usage, in characters or baht (see
+[Usage cap and alerts](#usage-cap-and-alerts)). Each server has at most one
+session.
 
 ### How a session looks in Discord
 
 1. The **first** `/tts join` in a server makes the bot join your voice channel
-   and post **one public session message** (a compact Thai embed) in the text
-   channel. You get a one-line private (ephemeral) confirmation.
+   and post a **public session card** (a compact Thai embed) in the text
+   channel you ran it in. You get a one-line private (ephemeral) confirmation.
 
    ```
    🔊 กำลังอ่านออกเสียง
-   👥 @a @b
+   👥 @a @b · #general
+   @c · #games
    🔈 #ห้องเสียง · เริ่มเมื่อ 3 นาทีที่แล้ว
    /tts join เพื่อให้อ่าน · /tts leave เพื่อออก · ลบข้อความหลังอ่าน
    ```
 
-   The participants are mentions (they do not notify anyone); the footer
-   (small text) says how to join and leave and what happens to messages. It
-   reads `ลบข้อความเมื่อจบ` when `TTS_DELETE_AFTER=0` and
-   `⚠️ ไม่มีสิทธิ์ลบข้อความ` (with an orange embed) when the bot lacks Manage
-   Messages. A hidden marker line below it lets a restarted bot finish the
-   session.
-2. Anyone else in **the same voice channel** runs `/tts join` **in the same
-   text channel**. They are added and the bot **edits** the session message;
-   it never posts a second one. They get a private confirmation.
-3. `/tts leave` removes you and edits the message. When the last participant
+   The participants are mentions (they do not notify anyone), grouped by the
+   channel they are read in; the footer (small text) says how to join and
+   leave and what happens to messages. It reads `ลบข้อความเมื่อจบ` when
+   `TTS_DELETE_AFTER=0` and `⚠️ ไม่มีสิทธิ์ลบข้อความ` (with an orange embed)
+   when the bot lacks Manage Messages in **that** channel. A hidden marker line
+   below it lets a restarted bot finish the session.
+2. Anyone else in **the same voice channel** runs `/tts join` **in the text
+   channel they want read**. They are added. If that channel has no card yet,
+   the bot posts one there; the cards in all channels are **edited** to show
+   the new person. There is **one card per text channel** that has (or had)
+   participants in the session, and every card lists everyone.
+3. Running `/tts join` again **in another text channel moves you**: from then
+   on your messages are read there, no longer in the old channel, and the reply
+   says so. Running it again in the channel you are already read in changes
+   nothing.
+4. `/tts leave` removes you and edits all the cards. When the last participant
    leaves, the session ends.
-4. While the session runs, each participant message is **deleted a few
-   seconds after it has been read aloud** (see below).
-5. When a session ends (last participant left, nobody but bots left in the
+5. While the session runs, each participant message is **deleted a few
+   seconds after it has been read aloud** (see below), in every channel.
+6. When a session ends (last participant left, nobody but bots left in the
    voice channel, the bot was disconnected or moved, or the bot shuts down),
-   the bot **deletes the messages the participants wrote** in that text channel
-   during the session that are still there and turns the session message into
-   a short summary that stays in the channel as a log:
+   the bot **deletes the messages the participants wrote** in the channels they
+   were read in during the session that are still there and turns every card
+   into the same short summary that stays in its channel as a log:
 
    ```
    📝 จบการอ่าน · @a @b · 25 นาที · ลบ 42 ข้อความ
    ```
 
-   The count includes the messages deleted along the way. Failures show as
-   `(ลบไม่ได้ N)`; without the permission it says `ไม่ได้ลบข้อความ (ไม่มีสิทธิ์)`.
+   The count (over all channels) includes the messages deleted along the way.
+   Failures show as `(ลบไม่ได้ N)`; if the bot could not delete in any channel
+   it says `ไม่ได้ลบข้อความ (ไม่มีสิทธิ์)`.
 
 Refusals are private and say what to do instead:
 
 - `/tts join` from a **different voice channel** while the session's voice
   channel still has people in it: refused, naming the busy channel. If nobody
   is left there, the old session is ended (with clean-up) and the new one starts.
-- `/tts join` from a **different text channel** while the session in your voice
-  channel is bound to another one: refused, naming the bound text channel.
 - `/tts leave` when you are not in the session, or no session runs.
+
+A message is read only if its author is a participant **and** it was sent in
+the channel that participant joined from. A participant's messages in other
+channels are neither read nor deleted while the session runs (but see the
+clean-up rules below for channels they were bound to earlier).
 
 #### Deleting each message after it is read (`TTS_DELETE_AFTER`)
 
 When the player has **finished playing** a participant's message (all audio
 sent, not merely queued), the bot deletes that message after
 `TTS_DELETE_AFTER` (default `8s`, i.e. the 5–10 s window; `0` turns this off
-and leaves only the clean-up at the end). Participant messages in the session's
-channel that are **not spoken** are deleted after the same delay, counted from
-the moment the bot gives up on them, so the channel stays clean: messages with
-nothing left to say after filtering (only a link, emoji or attachment), and
-ones skipped because the queue was full, synthesis failed or the monthly
-budget was reached. Messages of people who have left the session, and of people
-who never joined, are not touched this way.
+and leaves only the clean-up at the end). Participant messages in the channel
+they are read in that are **not spoken** are deleted after the same delay,
+counted from the moment the bot gives up on them, so the channel stays clean:
+messages with nothing left to say after filtering (only a link, emoji or
+attachment), and ones skipped because the queue was full, synthesis failed or
+the monthly budget was reached. Messages of people who have left the session,
+of people who never joined, and of participants in a channel they are not read
+in are not touched this way.
 
-- Only when the bot had **Manage Messages** when the session started.
+- Only in channels where the bot had **Manage Messages** when that channel's
+  card was posted (checked per channel).
 - One single delete per message, in the background; speech never waits for it.
 - A failed delete is logged once (`deleting message … after it was read`) and
   the message stays on the list for the clean-up at the end, which retries it.
@@ -297,46 +313,60 @@ who never joined, are not touched this way.
   and the end-of-session clean-up (which scans the channel history) takes
   whatever is left, so nothing is deleted twice or missed.
 
-What gets deleted at the end, exactly: messages in the session's text channel
-by **anyone who took part at any time** (including people who joined and later
-left), created **after that person first ran `/tts join` and before the session
-ended**. Never touched: messages by people who did not join, what a participant
-wrote before they joined, messages in other channels, anything from before the
-session, and the bot's own session message. After a restart the join times are
-not known, so a recovered session cleans from the session message on.
-Messages younger than 14 days go through Discord's bulk delete (chunks of at
-most 100); older ones are deleted one by one. The bot also remembers the
-participants' messages as they arrive, and scans the channel history after the
-session message when it ends, so a missed event or a restart does not leave
-messages behind. Because anything a participant writes in the channel during
-the session is deleted, `/tts join` tells people so.
+What gets deleted at the end, exactly: the session remembers a record of
+**(user, text channel, first join time)** for everyone who took part at any
+time (including people who joined and later left). In each channel it deletes
+the messages of the users bound to that channel, created **after that person
+first ran `/tts join` there and before the session ended**. A user who moved
+from `#a` to `#b` has both channels cleaned: `#a` from their first join there,
+`#b` from their first join there, including what they wrote in `#a` after
+moving away. Messages written after `/tts leave` in a bound channel are also
+deleted at the end. Never touched: messages by people who did not join, what a
+participant wrote in a channel before they joined it, messages in channels they
+were never bound to, anything from before the channel's card, and the bot's
+own cards. Messages younger than 14 days go through Discord's bulk delete
+(chunks of at most 100); older ones are deleted one by one. The bot also
+remembers the participants' messages as they arrive, and scans each channel's
+history after its card when the session ends, so a missed event or a restart
+does not leave messages behind. Because anything a participant writes in a
+bound channel during the session is deleted, `/tts join` tells people so.
 
-**Manage Messages** is needed for the deletion. The bot checks it in the text
-channel when the session starts. If it is missing, the session message turns
-orange and says nothing will be deleted, and the summary says
-`ไม่ได้ลบข้อความ`; the bot does not fail and reading works as usual.
-Participants are told at the start whether their messages will be deleted, so
-the bot does not delete anything if it did not have the permission then.
+**Manage Messages** is needed for the deletion. The bot checks it in each text
+channel when that channel's card is posted. If it is missing there, that card
+turns orange and says nothing will be deleted in that channel, and the channel
+is skipped at the end; reading works as usual. Participants are told when they
+join whether their messages will be deleted, so the bot does not delete
+anything in a channel where it did not have the permission then.
 
 If the bot **restarts** during a session, the session is lost (it leaves
-voice). The session message carries a hidden marker in its footer (like the
-usage status message) listing the participants. When the bot comes back it
-looks through the last 300 messages of each channel it can read for its own
-unfinished session messages and finishes their clean-up and summary. A session
-message that has been pushed out of that window by a busy channel is left as
-it is.
+voice). Every card carries a hidden marker in its footer (like the usage
+status message) with the whole session: the text channels, who is read where,
+who left, and the (user, channel, join time) records, so each card alone is
+enough to recover everything it names. The marker is **v2**
+(`sonnie-tts-session v2 … cards=… participants=… left=… binds=…`); v1 markers
+from older versions (one text channel, no join times) are still understood and
+cleaned from the card on. When the bot comes back it looks through the last 300
+messages of each channel it can read for its own unfinished cards, groups the
+cards of one session (v2 cards that name the same voice channel; a v1 card is
+a session of its own), merges their markers, and finishes the clean-up in every
+channel where it found a card and turns all of them into the summary. A card
+that has been pushed out of that window by a busy channel is left as it is, and
+its channel is not cleaned. A session started since the restart owns its own
+channels from its card on, so recovery stops there.
 
-Each session start, join, leave and end is logged as one line (user IDs and
-counts) for `kubectl logs`, e.g. `tts: session end guild=… reason="last
-participant left" users=… duration=25m0s deleted=42 failed=0`.
+Each session start, join, move, leave and end is logged as one line (user IDs,
+channel IDs and counts) for `kubectl logs`, e.g. `tts: session end guild=…
+channels=… reason="last participant left" users=… duration=25m0s deleted=42
+failed=0`.
 
 ### Status
 
 What works now:
 
-- `/tts join` and `/tts leave`: opt-in sessions, one per server, with one
-  session message and clean-up when it ends (see above). Only participants'
-  messages are spoken.
+- `/tts join` and `/tts leave`: opt-in sessions, one per server and one voice
+  channel, with one session card per text channel and clean-up when it ends
+  (see above). Only participants' messages, in the channel they joined from,
+  are spoken.
 - Message filtering and clean-up: bot, webhook and empty messages are
   ignored. Mentions become names (from cache) or are dropped. URLs become
   "ลิงก์" (or "link" when `TTS_LANG` isn't Thai). Custom emoji, timestamps,

@@ -264,7 +264,12 @@ session.
    moving to another text channel, `/tts leave` + rejoin, or disconnecting from
    voice and rejoining; a new session starts fresh. Run `/tts join voice:<choice>`
    to pick a specific voice (or change your current one); a picked voice counts
-   as used in the current round. Each assignment logs
+   as used in the current round. `voice:` is an autocomplete list of the pool
+   voices and the 14 Gemini-TTS female voices (`Achernar`, `Aoede`, `Autonoe`,
+   `Callirrhoe`, `Despina`, `Erinome`, `Gacrux`, `Kore`, `Laomedeia`, `Leda`,
+   `Pulcherrima`, `Sulafat`, `Vindemiatrix`, `Zephyr`), each labelled `(ชาย)` or
+   `(หญิง)`; type part of a name, or `หญิง`/`ชาย`, to filter (Discord shows 25
+   at a time). Female voices are only picked, never handed out at random. Each assignment logs
    `tts: session voice guild=… user=… voice=… round=…`.
 3. Anyone else in **the same voice channel** runs `/tts join` **in the text
    channel they want read**. They are added. If that channel has no card yet,

@@ -68,6 +68,25 @@ var DefaultVoicePool = []string{
 	"Zubenelgenubi",
 }
 
+// FemaleVoices lists the Gemini-TTS female voices. They are never handed out
+// at random; participants can pick one with /tts join voice:.
+var FemaleVoices = []string{
+	"Achernar",
+	"Aoede",
+	"Autonoe",
+	"Callirrhoe",
+	"Despina",
+	"Erinome",
+	"Gacrux",
+	"Kore",
+	"Laomedeia",
+	"Leda",
+	"Pulcherrima",
+	"Sulafat",
+	"Vindemiatrix",
+	"Zephyr",
+}
+
 type voiceContextKey struct{}
 
 // WithVoice attaches a per-utterance speaker voice override to ctx. An empty

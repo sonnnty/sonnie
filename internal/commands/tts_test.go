@@ -87,24 +87,44 @@ func TestTTS_JoinVoiceOptionChoices(t *testing.T) {
 	if voiceOpt.Name != "voice" || voiceOpt.Type != discordgo.ApplicationCommandOptionString || voiceOpt.Required {
 		t.Fatalf("unexpected voice option: %+v", voiceOpt)
 	}
-	if len(voiceOpt.Choices) != len(tts.DefaultVoicePool) {
-		t.Fatalf("expected %d default choices, got %d", len(tts.DefaultVoicePool), len(voiceOpt.Choices))
+	if !voiceOpt.Autocomplete || len(voiceOpt.Choices) != 0 {
+		t.Fatalf("voice must use autocomplete (30 voices exceed 25 fixed choices): %+v", voiceOpt)
 	}
-	for i, ch := range voiceOpt.Choices {
-		if ch.Name != tts.DefaultVoicePool[i] || ch.Value != tts.DefaultVoicePool[i] {
-			t.Fatalf("choice %d = %+v, want %q", i, ch, tts.DefaultVoicePool[i])
-		}
+	if c.Autocomplete == nil {
+		t.Fatal("/tts has no autocomplete handler")
 	}
 
-	// Custom pool with > 25 voices is capped at Discord's 25-choice limit.
-	var many []string
-	for i := 0; i < 30; i++ {
-		many = append(many, fmt.Sprintf("Voice%02d", i))
+	all := len(tts.DefaultVoicePool) + len(tts.FemaleVoices)
+	if len(pickableVoices) != all {
+		t.Fatalf("%d pickable voices, want %d", len(pickableVoices), all)
 	}
-	SetTTS(&poolController{pool: many})
+	if got := voiceSuggestions(""); len(got) != 25 {
+		t.Fatalf("empty query: %d suggestions, want the 25 maximum", len(got))
+	}
+	female := voiceSuggestions("หญิง")
+	if len(female) != len(tts.FemaleVoices) || female[0].Name != "Achernar (หญิง)" || female[0].Value != "Achernar" {
+		t.Fatalf("female suggestions %d, first %+v", len(female), female[0])
+	}
+	if got := voiceSuggestions("pu"); len(got) != 2 { // Puck, Pulcherrima
+		t.Fatalf("'pu': %d suggestions", len(got))
+	}
+	if got := voiceSuggestions("ชาย"); len(got) != len(tts.DefaultVoicePool) {
+		t.Fatalf("male suggestions %d", len(got))
+	}
+	for in, want := range map[string]string{"kore": "Kore", "Puck (ชาย)": "Puck", " charon ": "Charon"} {
+		if got, ok := matchVoice(in); !ok || got != want {
+			t.Errorf("matchVoice(%q) = %q, %v", in, got, ok)
+		}
+	}
+	if _, ok := matchVoice("Nobody"); ok {
+		t.Error("unknown voice accepted")
+	}
+
+	// A custom pool comes first; female voices are still offered.
+	SetTTS(&poolController{pool: []string{"Orus", "Custom"}})
 	t.Cleanup(func() { SetTTS(nil) })
-	if len(voiceOpt.Choices) != 25 || voiceOpt.Choices[0].Value != "Voice00" || voiceOpt.Choices[24].Value != "Voice24" {
-		t.Fatalf("expected 25 capped choices, got %d", len(voiceOpt.Choices))
+	if len(pickableVoices) != 2+len(tts.FemaleVoices) || pickableVoices[1].Label != "Custom" || pickableVoices[0].Label != "Orus (ชาย)" {
+		t.Fatalf("custom pool: %+v", pickableVoices[:3])
 	}
 }
 

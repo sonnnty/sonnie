@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -54,31 +55,106 @@ const (
 )
 
 var joinVoiceOption = &discordgo.ApplicationCommandOption{
-	Type:        discordgo.ApplicationCommandOptionString,
-	Name:        "voice",
-	Description: "Male voice for your messages in this session (default: random unused voice)",
-	Choices:     voiceOptionChoices(tts.DefaultVoicePool),
+	Type:         discordgo.ApplicationCommandOptionString,
+	Name:         "voice",
+	Description:  "Pick a voice, male or female (default: a random male voice)",
+	Autocomplete: true,
 }
+
+// pickableVoice is one voice offered by /tts join voice:.
+type pickableVoice struct {
+	Name  string
+	Label string // e.g. "Puck (ชาย)"
+}
+
+// pickableVoices is what /tts join voice: offers: the random pool (male by
+// default) and the female voices. Set by SetTTS.
+var pickableVoices = voiceList(nil)
 
 func setJoinVoiceChoices(pool []string) {
-	joinVoiceOption.Choices = voiceOptionChoices(pool)
+	pickableVoices = voiceList(pool)
 }
 
-func voiceOptionChoices(pool []string) []*discordgo.ApplicationCommandOptionChoice {
+// voiceList returns the pool voices, then the female voices not in the pool,
+// each labelled with its gender when it is known.
+func voiceList(pool []string) []pickableVoice {
 	if len(pool) == 0 {
 		pool = tts.DefaultVoicePool
 	}
-	if len(pool) > maxVoiceChoices {
-		pool = pool[:maxVoiceChoices]
+	male := make(map[string]bool)
+	for _, v := range tts.DefaultVoicePool {
+		male[strings.ToLower(v)] = true
 	}
-	choices := make([]*discordgo.ApplicationCommandOptionChoice, len(pool))
-	for i, v := range pool {
-		choices[i] = &discordgo.ApplicationCommandOptionChoice{
-			Name:  v,
-			Value: v,
+	female := make(map[string]bool)
+	for _, v := range tts.FemaleVoices {
+		female[strings.ToLower(v)] = true
+	}
+	label := func(v string) string {
+		switch k := strings.ToLower(v); {
+		case male[k]:
+			return v + " (ชาย)"
+		case female[k]:
+			return v + " (หญิง)"
+		}
+		return v
+	}
+	var out []pickableVoice
+	seen := make(map[string]bool)
+	for _, list := range [][]string{pool, tts.FemaleVoices} {
+		for _, v := range list {
+			if k := strings.ToLower(v); !seen[k] {
+				seen[k] = true
+				out = append(out, pickableVoice{Name: v, Label: label(v)})
+			}
 		}
 	}
-	return choices
+	return out
+}
+
+// matchVoice returns the pickable voice named name (any case).
+func matchVoice(name string) (string, bool) {
+	name = strings.TrimSpace(name)
+	for _, v := range pickableVoices {
+		if strings.EqualFold(v.Name, name) || strings.EqualFold(v.Label, name) {
+			return v.Name, true
+		}
+	}
+	return "", false
+}
+
+// voiceSuggestions answers autocomplete for voice: the voices whose label
+// contains query (so "หญิง" lists the female ones), at most 25.
+func voiceSuggestions(query string) []*discordgo.ApplicationCommandOptionChoice {
+	q := strings.ToLower(strings.TrimSpace(query))
+	var out []*discordgo.ApplicationCommandOptionChoice
+	for _, v := range pickableVoices {
+		if q != "" && !strings.Contains(strings.ToLower(v.Label), q) {
+			continue
+		}
+		out = append(out, &discordgo.ApplicationCommandOptionChoice{Name: v.Label, Value: v.Name})
+		if len(out) == maxVoiceChoices {
+			break
+		}
+	}
+	return out
+}
+
+// handleTTSAutocomplete suggests voices for /tts join voice:.
+func handleTTSAutocomplete(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	var query string
+	for _, sub := range i.ApplicationCommandData().Options {
+		for _, opt := range sub.Options {
+			if opt.Name == "voice" && opt.Focused {
+				query = opt.StringValue()
+			}
+		}
+	}
+	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionApplicationCommandAutocompleteResult,
+		Data: &discordgo.InteractionResponseData{Choices: voiceSuggestions(query)},
+	}); err != nil {
+		log.Printf("tts: voice autocomplete: %v", err)
+	}
 }
 
 func init() {
@@ -107,7 +183,8 @@ func init() {
 				},
 			},
 		},
-		Handler: handleTTS,
+		Handler:      handleTTS,
+		Autocomplete: handleTTSAutocomplete,
 	})
 }
 
@@ -134,6 +211,20 @@ func handleTTS(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			ttsRespondEphemeral(s, i, "เข้าห้องเสียงก่อน แล้วค่อยใช้ /tts join")
 			return
 		}
+		var pickedVoice string
+		for _, opt := range options[0].Options {
+			if opt.Name == "voice" {
+				pickedVoice = opt.StringValue()
+			}
+		}
+		if pickedVoice != "" {
+			name, ok := matchVoice(pickedVoice)
+			if !ok {
+				ttsRespondEphemeral(s, i, "ไม่รู้จักเสียง "+pickedVoice+" — เลือกจากรายการในช่อง voice")
+				return
+			}
+			pickedVoice = name
+		}
 		// Joining voice can take longer than the 3 s Discord allows for a
 		// first response, so acknowledge now and edit the reply later. The
 		// public message is the session message in the channel; this reply
@@ -144,12 +235,6 @@ func handleTTS(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		}); err != nil {
 			log.Printf("tts: failed to defer interaction: %v", err)
 			return
-		}
-		var pickedVoice string
-		for _, opt := range options[0].Options {
-			if opt.Name == "voice" {
-				pickedVoice = opt.StringValue()
-			}
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), ttsJoinTimeout)
 		defer cancel()

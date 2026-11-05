@@ -187,3 +187,17 @@ func TestDashboard_PanelsAndHealth(t *testing.T) {
 		t.Fatalf("not redacted: %q", line)
 	}
 }
+
+func TestWhoMayEnter_NamesTheServerAndRoles(t *testing.T) {
+	s := testSession(t)
+	got := whoMayEnter(s, config.DashboardConfig{GuildID: "g1", RoleIDs: []string{"mod", "gone"}})
+	if !strings.Contains(got, "บ้านเพื่อน") || !strings.Contains(got, "role mod หรือ gone") {
+		t.Fatalf("role rule: %q", got)
+	}
+	if got := whoMayEnter(s, config.DashboardConfig{GuildID: "g1"}); !strings.Contains(got, "Manage Server ในเซิร์ฟเวอร์ บ้านเพื่อน") {
+		t.Fatalf("guild rule: %q", got)
+	}
+	if got := whoMayEnter(s, config.DashboardConfig{}); got != "" {
+		t.Fatalf("no rule configured: %q (the server's default text applies)", got)
+	}
+}

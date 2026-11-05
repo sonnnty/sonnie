@@ -205,7 +205,7 @@ clean-up rules below for channels they were bound to earlier).
   its server's queue was full and it was the oldest waiting message (the
   **oldest waiting message is dropped**, because in a live chat the newest
   messages matter most; `TTS_QUEUE_SIZE`, default 20 per server), when
-  synthesis failed or timed out (30 s), or when the monthly budget or
+  synthesis failed or timed out (30 s per message; 15 s per REST request), or when the monthly budget or
   character limit was reached (the first refusal each month is logged once:
   `tts: … messages are skipped until next month`). A message made only of a
   link is not dropped: it is read as "ลิงก์".
@@ -302,7 +302,7 @@ where it found a card and turns all of them into the summary. Limits:
 Each session start, join, move, leave and end is logged as one line (user IDs,
 channel IDs and counts) for `kubectl logs`, e.g. `tts: session end guild=…
 channels=… reason="last participant left" users=… duration=25m0s deleted=42
-failed=0`.
+failed=0 no_permission=false`.
 
 ## Speech synthesis
 
@@ -367,8 +367,8 @@ cannot be set up at startup it logs the error and uses REST.
   arriving. Pacing (20 ms), the queue and "one message at a time" are
   unchanged.
 - `/tts leave`, the bot leaving on its own, or shutdown cancel the call in
-  flight. **A stream that sends no audio for 30 s is abandoned** (and so is a
-  non-streamed synthesis that takes longer than 30 s).
+  flight. **A stream that sends no audio for 30 s is abandoned** (a non-streamed REST request gives up after 15 s, the whole synthesis of
+  one message after 30 s).
 - **Fallback:** if the stream fails before any audio arrives (an error, or the
   call ends without audio), the bot logs
   `tts: google: stream failed before any audio, retrying once with REST: ...`

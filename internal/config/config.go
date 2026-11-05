@@ -36,8 +36,8 @@ type EventsConfig struct {
 	// those image libraries in front of Openverse, which needs no key.
 	PexelsKey   string
 	UnsplashKey string
-	// BraveKey (BRAVE_SEARCH_API_KEY, a secret) adds Brave web image search
-	// between Unsplash and Openverse. Those are ordinary web images without
+	// BraveKey (BRAVE_SEARCH_API_KEY, a secret) adds Brave web image search,
+	// tried first (Brave → Unsplash → Openverse). Those are ordinary web images without
 	// a licence; unset the key to turn it off.
 	BraveKey string
 	// GoogleCredentialsFile (GOOGLE_APPLICATION_CREDENTIALS) is the service

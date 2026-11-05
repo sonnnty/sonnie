@@ -182,8 +182,8 @@ minute of counts.
   after it** in that channel; if it cannot be found the count restarts at 0
   (and a new status message is created). Use a dedicated channel.
 - The bot needs **View Channel**, **Send Messages** and **Read Message
-  History** in the alert channel (no pinning, no other permissions). Embeds are
-  sent as embeds, so give it **Embed Links** too.
+  History** in the alert channel, plus **Embed Links** because the status
+  message and alerts are embeds. No pinning or other permissions.
 - **No alert channel:** if `TTS_ALERT_CHANNEL_ID` is not set, the count is kept
   in memory only, resets when the bot restarts, no alerts are posted, and a
   warning is logged at startup (`usage: TTS_ALERT_CHANNEL_ID is not set; the

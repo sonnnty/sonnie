@@ -55,6 +55,9 @@ type Config struct {
 	Access       Authorizer
 
 	Panels []Panel
+	// WhoMayEnter, if set, describes in Thai who may see the dashboard; the
+	// 403 page shows it. It is called per refusal, so it may read live state.
+	WhoMayEnter func() string
 	// Healthy reports whether the Discord gateway is connected.
 	Healthy func() bool
 	// Webhooks, if set, serves POST /hooks/{name}.
@@ -253,11 +256,17 @@ func (s *Server) notConfigured(w http.ResponseWriter) {
 }
 
 func (s *Server) forbidden(w http.ResponseWriter, user string) {
+	who := "แดชบอร์ดนี้เปิดให้เฉพาะผู้ดูแลเซิร์ฟเวอร์ที่มีสิทธิ์ Administrator หรือ Manage Server ในเซิร์ฟเวอร์ที่ SONNIE อยู่ หรือผู้ที่เจ้าของบอทอนุญาตไว้เท่านั้น"
+	if s.cfg.WhoMayEnter != nil {
+		if t := s.cfg.WhoMayEnter(); t != "" {
+			who = t
+		}
+	}
 	s.render(w, http.StatusForbidden, "message", page{
 		Title:   "ไม่มีสิทธิ์เข้าถึง",
 		User:    user,
 		Heading: "ขออภัย คุณไม่มีสิทธิ์ดูแดชบอร์ดนี้",
-		Text:    "แดชบอร์ดนี้เปิดให้เฉพาะผู้ดูแลเซิร์ฟเวอร์ที่มีสิทธิ์ Administrator หรือ Manage Server ในเซิร์ฟเวอร์ที่ SONNIE อยู่ หรือผู้ที่เจ้าของบอทอนุญาตไว้เท่านั้น",
+		Text:    who,
 		Hint:    "ถ้าคิดว่าควรเข้าได้ ลองติดต่อเจ้าของบอท หรือออกจากระบบแล้วเข้าด้วยบัญชีอื่น",
 		Link:    "ออกจากระบบ",
 		LinkTo:  "/auth/logout",

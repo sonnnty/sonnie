@@ -68,8 +68,8 @@ a separate repository (homelab-ops), not here.
 
 Releases use semantic versions. A release is a git tag `vX.Y.Z` on `main` and
 an image `rg.tapb.ch/sonnie:X.Y.Z`, built with `--build-arg VERSION=X.Y.Z`
-(the version is shown on the dashboard's bot panel; without the argument it
-shows the git revision or `dev`):
+(the version is shown on the dashboard's bot panel; an image built without the argument shows `dev`, because `.git` is not in the
+build context; only a plain `go build` falls back to the git revision):
 
 ```bash
 git tag vX.Y.Z

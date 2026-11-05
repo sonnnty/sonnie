@@ -63,8 +63,9 @@ func (b *Bot) newDashboard(cfg config.Config) (*dashboard.Server, error) {
 			GuildID: d.GuildID,
 			RoleIDs: d.RoleIDs,
 		},
-		Panels:  b.dashboardPanels(),
-		Healthy: b.connected.Load,
+		WhoMayEnter: func() string { return whoMayEnter(b.Session, d) },
+		Panels:      b.dashboardPanels(),
+		Healthy:     b.connected.Load,
 	}
 	if b.hooks != nil {
 		srvCfg.Webhooks = b.hooks
@@ -319,4 +320,38 @@ func (g stateGuilds) Member(ctx context.Context, guildID, userID string) (dashbo
 	}
 	gm.MemberRoles = m.Roles
 	return gm, true, nil
+}
+
+// whoMayEnter tells a refused user, in Thai, who may see the dashboard, with
+// the server and role names from the gateway state (IDs when not loaded).
+func whoMayEnter(s *discordgo.Session, d config.DashboardConfig) string {
+	guildName := d.GuildID
+	roleNames := make(map[string]string)
+	if d.GuildID != "" && s != nil && s.State != nil {
+		if g, err := s.State.Guild(d.GuildID); err == nil {
+			s.State.RLock()
+			if g.Name != "" {
+				guildName = g.Name
+			}
+			for _, r := range g.Roles {
+				roleNames[r.ID] = r.Name
+			}
+			s.State.RUnlock()
+		}
+	}
+	switch {
+	case len(d.RoleIDs) > 0:
+		names := make([]string, 0, len(d.RoleIDs))
+		for _, id := range d.RoleIDs {
+			if n := roleNames[id]; n != "" {
+				names = append(names, n)
+			} else {
+				names = append(names, id)
+			}
+		}
+		return fmt.Sprintf("แดชบอร์ดนี้เปิดให้เฉพาะสมาชิกเซิร์ฟเวอร์ %s ที่มี role %s หรือผู้ที่เจ้าของบอทอนุญาตไว้เท่านั้น", guildName, strings.Join(names, " หรือ "))
+	case d.GuildID != "":
+		return fmt.Sprintf("แดชบอร์ดนี้เปิดให้เฉพาะผู้ที่มีสิทธิ์ Administrator หรือ Manage Server ในเซิร์ฟเวอร์ %s หรือผู้ที่เจ้าของบอทอนุญาตไว้เท่านั้น", guildName)
+	}
+	return ""
 }

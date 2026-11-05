@@ -2,6 +2,7 @@ package readaloud
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"slices"
@@ -290,9 +291,30 @@ func ParseSessionMarker(text string) (SessionMarker, bool) {
 	return SessionMarker{}, false
 }
 
-// ParseSessionMarkerFromEmbed reads the marker from an embed's footer.
+// markerURLPrefix starts the embed URL that carries the marker. An embed
+// without a title never shows its URL, so the marker stays out of sight while
+// Discord keeps it (checked live: kept on send and edit, 2027 characters).
+const markerURLPrefix = "https://sonnie.invalid/tts#"
+
+// markerURL hides m in an embed URL, base64url-encoded.
+func markerURL(m SessionMarker) string {
+	return markerURLPrefix + base64.RawURLEncoding.EncodeToString([]byte(FormatSessionMarker(m)))
+}
+
+// ParseSessionMarkerFromEmbed reads the marker from an embed: from its hidden
+// URL, or from the footer of cards posted before the marker moved there.
 func ParseSessionMarkerFromEmbed(e *discordgo.MessageEmbed) (SessionMarker, bool) {
-	if e == nil || e.Footer == nil {
+	if e == nil {
+		return SessionMarker{}, false
+	}
+	if enc, ok := strings.CutPrefix(e.URL, markerURLPrefix); ok {
+		if raw, err := base64.RawURLEncoding.DecodeString(enc); err == nil {
+			if m, ok := ParseSessionMarker(string(raw)); ok {
+				return m, true
+			}
+		}
+	}
+	if e.Footer == nil {
 		return SessionMarker{}, false
 	}
 	return ParseSessionMarker(e.Footer.Text)
@@ -440,10 +462,10 @@ func (v sessionView) marker(open bool) SessionMarker {
 	return m
 }
 
-// footer is the small text of a session message: a human line, then the
-// hidden marker line.
-func footer(human string, m SessionMarker) *discordgo.MessageEmbedFooter {
-	return &discordgo.MessageEmbedFooter{Text: human + "\n" + FormatSessionMarker(m)}
+// footer is the small text of a session message. The marker is not in it but
+// in the embed's hidden URL (markerURL).
+func footer(human string) *discordgo.MessageEmbedFooter {
+	return &discordgo.MessageEmbedFooter{Text: human}
 }
 
 // mentions renders ids as Discord mentions joined by sep. Mentions inside an
@@ -505,11 +527,11 @@ func sessionEmbed(v sessionView, channelID string) *discordgo.MessageEmbed {
 		deletion = "⚠️ ไม่มีสิทธิ์ลบข้อความ"
 	}
 	return &discordgo.MessageEmbed{
-		Title: "🔊 กำลังอ่านออกเสียง",
-		Description: fmt.Sprintf("👥 %s\n🔈 <#%s> · <t:%d:R>",
-			participantLines(v), v.VoiceChannelID, v.Started.Unix()),
+		URL: markerURL(v.marker(true)),
+		Description: fmt.Sprintf("🔈 <#%s> · <t:%d:R>\n👥 %s",
+			v.VoiceChannelID, v.Started.Unix(), participantLines(v)),
 		Color:     color,
-		Footer:    footer("/tts join เพื่อให้อ่าน · /tts leave เพื่อออก · "+deletion, v.marker(true)),
+		Footer:    footer("/tts join เพื่อให้อ่าน · /tts leave เพื่อออก · " + deletion),
 		Timestamp: v.Started.UTC().Format(time.RFC3339),
 	}
 }
@@ -548,9 +570,10 @@ func summaryEmbed(v sessionView, s summary, ended time.Time) *discordgo.MessageE
 	// ended one never needs it again.
 	m := SessionMarker{Open: false, Started: v.Started, Voice: v.VoiceChannelID}
 	return &discordgo.MessageEmbed{
+		URL:         markerURL(m),
 		Description: summaryText(s),
 		Color:       colorEnded,
-		Footer:      footer(usage.StatusFooterHuman, m),
+		Footer:      footer(usage.StatusFooterHuman),
 		Timestamp:   ended.UTC().Format(time.RFC3339),
 	}
 }

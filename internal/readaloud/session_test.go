@@ -1,6 +1,8 @@
 package readaloud
 
 import (
+	"github.com/bwmarrin/discordgo"
+
 	"fmt"
 	"reflect"
 	"strings"
@@ -166,17 +168,17 @@ func TestSessionEmbed(t *testing.T) {
 	v.PerMessage = true
 	e := sessionEmbed(v, "t1")
 
-	if e.Title != "🔊 กำลังอ่านออกเสียง" {
-		t.Errorf("title %q", e.Title)
+	if e.Title != "" {
+		t.Errorf("title %q: the card has no title, so its marker URL stays hidden", e.Title)
 	}
-	wantDesc := "👥 <@1> <@3> · <#t1>\n<@2> · <#t2>\n🔈 <#v1> · <t:1793000000:R>"
+	wantDesc := "🔈 <#v1> · <t:1793000000:R>\n👥 <@1> <@3> · <#t1>\n<@2> · <#t2>"
 	if e.Description != wantDesc {
 		t.Errorf("description %q, want %q", e.Description, wantDesc)
 	}
 	if len(e.Fields) != 0 {
 		t.Errorf("the embed has no fields, got %+v", e.Fields)
 	}
-	human, _, _ := strings.Cut(e.Footer.Text, "\n")
+	human := e.Footer.Text
 	if want := "/tts join เพื่อให้อ่าน · /tts leave เพื่อออก · ลบข้อความหลังอ่าน"; human != want {
 		t.Errorf("footer %q, want %q", human, want)
 	}
@@ -221,7 +223,7 @@ func TestSessionEmbed_CapsLongLists(t *testing.T) {
 
 func TestSessionEmbed_NoParticipants(t *testing.T) {
 	e := sessionEmbed(sessionView{VoiceChannelID: "v1", Started: markerStart}, "t1")
-	if !strings.HasPrefix(e.Description, "👥 -\n") {
+	if !strings.HasSuffix(e.Description, "\n👥 -") {
 		t.Errorf("description %q", e.Description)
 	}
 }
@@ -251,5 +253,41 @@ func TestFormatSessionDuration(t *testing.T) {
 		if got := formatSessionDuration(d); got != want {
 			t.Errorf("%v: got %q, want %q", d, got, want)
 		}
+	}
+}
+
+func TestSessionEmbed_MarkerIsHiddenInTheURL(t *testing.T) {
+	v := twoChannelView()
+	for _, e := range []*discordgo.MessageEmbed{
+		sessionEmbed(v, "t1"),
+		summaryEmbed(v, summary{}, markerStart.Add(time.Hour)),
+	} {
+		if strings.Contains(e.Footer.Text, sessionMarkerPrefix) || strings.Contains(e.Description, sessionMarkerPrefix) {
+			t.Errorf("marker shown: footer %q", e.Footer.Text)
+		}
+		if !strings.HasPrefix(e.URL, markerURLPrefix) || e.Title != "" {
+			t.Errorf("url %q title %q", e.URL, e.Title)
+		}
+		if _, ok := ParseSessionMarkerFromEmbed(e); !ok {
+			t.Error("marker not readable back")
+		}
+	}
+	// The longest marker still fits Discord's embed URL (2048 is safe; 2027 was checked live).
+	big := v
+	for i := 0; i < 200; i++ {
+		big = big.join(fmt.Sprintf("1%017d", i), "t1", true, markerStart.Add(time.Duration(i)*time.Minute)).leave(fmt.Sprintf("1%017d", i))
+	}
+	if u := sessionEmbed(big, "t1").URL; len(u) > 2048 {
+		t.Errorf("url is %d characters", len(u))
+	}
+}
+
+func TestParseSessionMarkerFromEmbed_OldFooterCards(t *testing.T) {
+	v := twoChannelView()
+	old := &discordgo.MessageEmbed{Footer: &discordgo.MessageEmbedFooter{
+		Text: "/tts join เพื่อให้อ่าน\n" + FormatSessionMarker(v.marker(true)),
+	}}
+	if m, ok := ParseSessionMarkerFromEmbed(old); !ok || !m.Open || m.Voice != "v1" {
+		t.Fatalf("marker %+v ok=%v", m, ok)
 	}
 }

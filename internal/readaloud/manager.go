@@ -350,6 +350,7 @@ func (m *Manager) start(ctx context.Context, req JoinRequest) (JoinResult, error
 		Started:        s.started,
 		PerMessage:     m.cfg.DeleteAfter > 0,
 	}.join(req.UserID, req.TextChannelID, manage, time.Time{})
+	logMarker(req.GuildID, s.view)
 	id, created, err := m.cfg.Messenger.Post(ctx, req.TextChannelID, sessionEmbed(s.view, req.TextChannelID))
 	if err != nil {
 		if derr := conn.Disconnect(); derr != nil {
@@ -834,6 +835,7 @@ func (m *Manager) editCards(s *session, view sessionView, skipChannel string) {
 	m.mu.Lock()
 	cards := maps.Clone(s.cards)
 	m.mu.Unlock()
+	logMarker(s.guildID, view)
 	for _, c := range view.Channels {
 		cd, ok := cards[c.ID]
 		if !ok || c.ID == skipChannel {
@@ -1053,4 +1055,10 @@ func recoveredSession(guildID string, cards []OpenSession, ended time.Time) ende
 			slices.IndexFunc(v.Channels, func(c MarkerChannel) bool { return c.ID == b.channelID })
 	})
 	return e
+}
+
+// logMarker writes the session state that the cards carry out of sight, so it
+// can be read in the pod log.
+func logMarker(guildID string, v sessionView) {
+	log.Printf("tts: session state guild=%s %s", guildID, FormatSessionMarker(v.marker(true)))
 }

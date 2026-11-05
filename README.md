@@ -237,10 +237,9 @@ session.
    channel you ran it in. You get a one-line private (ephemeral) confirmation.
 
    ```
-   🔊 กำลังอ่านออกเสียง
+   🔈 #ห้องเสียง · 3 นาทีที่แล้ว
    👥 @a @b · #general
    @c · #games
-   🔈 #ห้องเสียง · เริ่มเมื่อ 3 นาทีที่แล้ว
    /tts join เพื่อให้อ่าน · /tts leave เพื่อออก · ลบข้อความหลังอ่าน
    ```
 
@@ -248,8 +247,10 @@ session.
    channel they are read in; the footer (small text) says how to join and
    leave and what happens to messages. It reads `ลบข้อความเมื่อจบ` when
    `TTS_DELETE_AFTER=0` and `⚠️ ไม่มีสิทธิ์ลบข้อความ` (with an orange embed)
-   when the bot lacks Manage Messages in **that** channel. A hidden marker line
-   below it lets a restarted bot finish the session.
+   when the bot lacks Manage Messages in **that** channel. The session state that
+   lets a restarted bot finish the session is hidden in the embed's URL (an
+   embed without a title never shows it) and written to the log as
+   `tts: session state …` on every change.
 2. Anyone else in **the same voice channel** runs `/tts join` **in the text
    channel they want read**. They are added. If that channel has no card yet,
    the bot posts one there; the cards in all channels are **edited** to show
@@ -340,8 +341,9 @@ join whether their messages will be deleted, so the bot does not delete
 anything in a channel where it did not have the permission then.
 
 If the bot **restarts** during a session, the session is lost (it leaves
-voice). Every card carries a hidden marker in its footer (like the usage
-status message) with the whole session: the text channels, who is read where,
+voice). Every card carries a hidden marker in its embed URL
+(`https://sonnie.invalid/tts#<base64url>`; cards from older versions had it in
+the footer and are still read) with the whole session: the text channels, who is read where,
 who left, and the (user, channel, join time) records, so each card alone is
 enough to recover everything it names. The marker is **v2**
 (`sonnie-tts-session v2 … cards=… participants=… left=… binds=…`); v1 markers

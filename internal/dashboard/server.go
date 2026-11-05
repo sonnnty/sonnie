@@ -225,6 +225,8 @@ type page struct {
 	Panels      []Panel
 	TOC         []DocItem
 	DocsContent template.HTML
+	// BodyClass styles the page, e.g. "page-dashboard" for the full-window grid.
+	BodyClass string
 }
 
 func (s *Server) render(w http.ResponseWriter, status int, name string, p page) {
@@ -290,7 +292,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	s.render(w, http.StatusOK, "dashboard", page{Title: "แดชบอร์ด", User: sess.Name, Nav: "dashboard", Panels: s.cfg.Panels})
+	s.render(w, http.StatusOK, "dashboard", page{Title: "แดชบอร์ด", User: sess.Name, Nav: "dashboard", Panels: s.cfg.Panels, BodyClass: "page-dashboard"})
 }
 
 func (s *Server) handleDocsIndex(w http.ResponseWriter, r *http.Request) {

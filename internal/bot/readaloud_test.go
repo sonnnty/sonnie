@@ -113,3 +113,22 @@ func TestNewSpeechPipeline_PassesGeminiSettings(t *testing.T) {
 		t.Fatalf("got %#v", synth)
 	}
 }
+
+func TestBotNew_PassesVoicePoolToReadAloud(t *testing.T) {
+	b, err := New(config.Config{
+		DiscordToken: "t",
+		TTS: config.TTSConfig{
+			Enabled:   true,
+			Lang:      "th",
+			VoicePool: []string{"Puck", "Orus"},
+			MaxChars:  200,
+			QueueSize: 20,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(b.readAloud.VoicePool(), ","); got != "Puck,Orus" {
+		t.Fatalf("VoicePool = %q, want Puck,Orus", got)
+	}
+}

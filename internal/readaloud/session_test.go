@@ -123,7 +123,11 @@ func TestFormatSessionMarker_StaysWithinFooterLimit(t *testing.T) {
 }
 
 func twoChannelView() sessionView {
-	return sessionView{VoiceChannelID: "v1", Started: markerStart}.
+	return sessionView{
+		VoiceChannelID: "v1",
+		Started:        markerStart,
+		Voices:         map[string]string{"1": "Puck", "2": "Orus", "3": "Charon"},
+	}.
 		join("1", "t1", true, time.Time{}).
 		join("2", "t2", false, markerStart.Add(time.Minute)).
 		join("3", "t1", true, markerStart.Add(2*time.Minute))
@@ -171,7 +175,7 @@ func TestSessionEmbed(t *testing.T) {
 	if e.Title != "" {
 		t.Errorf("title %q: the card has no title, so its marker URL stays hidden", e.Title)
 	}
-	wantDesc := "🔈 <#v1> · <t:1793000000:R>\n👥 <@1> <@3> · <#t1>\n<@2> · <#t2>"
+	wantDesc := "🔈 <#v1> · <t:1793000000:R>\n👥 <@1> 🎙️Puck, <@3> 🎙️Charon · <#t1>\n<@2> 🎙️Orus · <#t2>"
 	if e.Description != wantDesc {
 		t.Errorf("description %q, want %q", e.Description, wantDesc)
 	}

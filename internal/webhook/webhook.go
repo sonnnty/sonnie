@@ -278,12 +278,19 @@ func presentedToken(r *http.Request) string {
 	return strings.TrimSpace(r.Header.Get("X-Sonnie-Token"))
 }
 
-// sourceIP is the peer address. X-Forwarded-For is not trusted: the server
-// is reached directly through a NodePort.
+// sourceIP is the peer address, followed by the client the reverse proxy in
+// front (sonnie.tapb.ch) reports in X-Forwarded-For. It is only shown and
+// logged, never used to decide anything, so the header needs no trust.
 func sourceIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		host = r.RemoteAddr
+	}
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		client := strings.TrimSpace(strings.Split(xff, ",")[0])
+		if ip := net.ParseIP(client); ip != nil {
+			return ip.String() + " via " + host
+		}
 	}
 	return host
 }

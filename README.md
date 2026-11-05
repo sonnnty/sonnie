@@ -776,7 +776,10 @@ NodePort). Set `DASHBOARD_ADDR=` (empty) or `off` to turn the server off.
 
 A Discord user can see it when they are listed in `DASHBOARD_ALLOWED_USERS`,
 **or** when they own, or have **Administrator** or **Manage Server** in, a
-server the bot is in. The bot checks with its own token (guild roles from
+server the bot is in. `DASHBOARD_GUILD_ID` limits this to one server, and
+`DASHBOARD_ROLE_IDS` (comma-separated, needs `DASHBOARD_GUILD_ID`) replaces
+the Administrator/Manage Server rule: members of that server with any one of
+those roles get in (production: role TABP in the TAPB server). The bot checks with its own token (guild roles from
 the gateway, the user's roles over REST), never the user's token. Anyone
 else gets a polite 403 page in Thai. The check is redone at most every 10
 minutes per user, so losing the role takes effect within 10 minutes.
@@ -864,6 +867,8 @@ curl -X POST http://10.10.5.35:31120/hooks/ci -H "X-Sonnie-Token: $TOKEN" \
 | `DISCORD_CLIENT_ID` | bot's application ID | OAuth2 client ID |
 | `DISCORD_CLIENT_SECRET` | – | OAuth2 client secret (**secret**) |
 | `DASHBOARD_SESSION_KEY` | – | ≥ 32 random bytes that seal the session cookie (**secret**) |
+| `DASHBOARD_GUILD_ID` | – | Only members of this server may log in |
+| `DASHBOARD_ROLE_IDS` | – | Members of `DASHBOARD_GUILD_ID` with one of these roles get in (instead of Administrator/Manage Server) |
 | `DASHBOARD_ALLOWED_USERS` | – | Comma-separated user IDs always allowed in |
 | `WEBHOOKS` | – | `name=token@channelID,…` (**secret**) |
 

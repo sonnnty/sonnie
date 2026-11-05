@@ -3,9 +3,11 @@ package bot
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -55,7 +57,12 @@ func (b *Bot) newDashboard(cfg config.Config) (*dashboard.Server, error) {
 			}
 			return b.applicationID()
 		},
-		Access:  dashboard.GuildAccess{Allowed: d.AllowedUsers, Guilds: stateGuilds{s: b.Session}},
+		Access: dashboard.GuildAccess{
+			Allowed: d.AllowedUsers,
+			Guilds:  stateGuilds{s: b.Session},
+			GuildID: d.GuildID,
+			RoleIDs: d.RoleIDs,
+		},
 		Panels:  b.dashboardPanels(),
 		Healthy: b.connected.Load,
 	}
@@ -67,6 +74,14 @@ func (b *Bot) newDashboard(cfg config.Config) (*dashboard.Server, error) {
 		return nil, err
 	}
 	if srv.LoginEnabled() {
+		who := "Administrator or Manage Server in any server the bot is in"
+		switch {
+		case len(d.RoleIDs) > 0:
+			who = fmt.Sprintf("members of server %s with role %s", d.GuildID, strings.Join(d.RoleIDs, " or "))
+		case d.GuildID != "":
+			who = "Administrator or Manage Server in server " + d.GuildID
+		}
+		log.Printf("dashboard: login allowed for %s, plus %d listed user(s)", who, len(d.AllowedUsers))
 		log.Printf("dashboard: listening on %s; Discord login with redirect URI %s (register it in the Developer Portal → OAuth2 → Redirects); %d hook(s)",
 			d.Addr, d.RedirectURI(), len(cfg.Webhooks))
 	} else {

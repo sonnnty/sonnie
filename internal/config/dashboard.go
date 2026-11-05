@@ -27,6 +27,13 @@ type DashboardConfig struct {
 	// AllowedUsers (DASHBOARD_ALLOWED_USERS) may always see the dashboard,
 	// on top of the guild administrators and managers.
 	AllowedUsers []string
+	// GuildID (DASHBOARD_GUILD_ID) limits login to members of this server.
+	// Empty means any server the bot is in.
+	GuildID string
+	// RoleIDs (DASHBOARD_ROLE_IDS) lets in members of GuildID who have at
+	// least one of these roles, instead of requiring Administrator or Manage
+	// Server. Needs GuildID.
+	RoleIDs []string
 }
 
 // LoginEnabled reports whether Discord login, and with it the dashboard
@@ -97,6 +104,26 @@ func loadDashboard(lookup func(string) (string, bool)) (DashboardConfig, error) 
 			return DashboardConfig{}, fmt.Errorf("DASHBOARD_ALLOWED_USERS: %q is not a Discord user ID", id)
 		}
 		cfg.AllowedUsers = append(cfg.AllowedUsers, id)
+	}
+
+	if g := strings.TrimSpace(get("DASHBOARD_GUILD_ID")); g != "" {
+		if !isSnowflake(g) {
+			return DashboardConfig{}, fmt.Errorf("DASHBOARD_GUILD_ID: %q is not a Discord server ID", g)
+		}
+		cfg.GuildID = g
+	}
+	for _, part := range strings.Split(get("DASHBOARD_ROLE_IDS"), ",") {
+		id := strings.TrimSpace(part)
+		if id == "" {
+			continue
+		}
+		if !isSnowflake(id) {
+			return DashboardConfig{}, fmt.Errorf("DASHBOARD_ROLE_IDS: %q is not a Discord role ID", id)
+		}
+		cfg.RoleIDs = append(cfg.RoleIDs, id)
+	}
+	if len(cfg.RoleIDs) > 0 && cfg.GuildID == "" {
+		return DashboardConfig{}, fmt.Errorf("DASHBOARD_ROLE_IDS needs DASHBOARD_GUILD_ID (the server the roles belong to)")
 	}
 
 	// Login needs all three; a partial set is a mistake worth stopping for

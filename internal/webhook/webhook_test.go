@@ -385,3 +385,21 @@ func TestWebhook_RecentCallsAreBounded(t *testing.T) {
 		t.Fatalf("calls %d", st.Hooks[0].Calls)
 	}
 }
+
+func TestSourceIP_ShowsTheForwardedClient(t *testing.T) {
+	cases := []struct{ remote, xff, want string }{
+		{"10.244.3.1:5555", "", "10.244.3.1"},
+		{"10.244.3.1:5555", "203.0.113.7, 10.10.5.1", "203.0.113.7 via 10.244.3.1"},
+		{"10.244.3.1:5555", "not-an-ip", "10.244.3.1"},
+	}
+	for _, c := range cases {
+		r := httptest.NewRequest(http.MethodPost, "/hooks/x", nil)
+		r.RemoteAddr = c.remote
+		if c.xff != "" {
+			r.Header.Set("X-Forwarded-For", c.xff)
+		}
+		if got := sourceIP(r); got != c.want {
+			t.Errorf("sourceIP(%q, %q) = %q, want %q", c.remote, c.xff, got, c.want)
+		}
+	}
+}

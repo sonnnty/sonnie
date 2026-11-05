@@ -97,6 +97,9 @@ func TestLoad_DashboardInvalid(t *testing.T) {
 		"missing secret":  {"DISCORD_CLIENT_SECRET": ""},
 		"missing url":     {"DASHBOARD_PUBLIC_URL": ""},
 		"missing session": {"DASHBOARD_SESSION_KEY": ""},
+		"bad guild":       {"DASHBOARD_GUILD_ID": "tapb"},
+		"bad role":        {"DASHBOARD_GUILD_ID": "244080963573907456", "DASHBOARD_ROLE_IDS": "332139701425405963,TABP"},
+		"role no guild":   {"DASHBOARD_ROLE_IDS": "332139701425405963"},
 	}
 	for name, override := range cases {
 		env := map[string]string{}
@@ -155,5 +158,23 @@ func TestLoad_WebhooksInvalid(t *testing.T) {
 		if strings.Contains(err.Error(), tok) {
 			t.Errorf("%q: error leaks the token: %v", raw, err)
 		}
+	}
+}
+
+func TestLoad_DashboardGuildAndRoles(t *testing.T) {
+	cfg, err := Load(envFrom(map[string]string{
+		"DISCORD_BOT_TOKEN":     "t",
+		"DISCORD_CLIENT_SECRET": "shh",
+		"DASHBOARD_PUBLIC_URL":  "https://sonnie.tapb.ch",
+		"DASHBOARD_SESSION_KEY": testSessionKey,
+		"DASHBOARD_GUILD_ID":    "244080963573907456",
+		"DASHBOARD_ROLE_IDS":    " 332139701425405963 , 1026355658473340969",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := cfg.Dashboard
+	if d.GuildID != "244080963573907456" || len(d.RoleIDs) != 2 || d.RoleIDs[0] != "332139701425405963" {
+		t.Fatalf("guild %q roles %v", d.GuildID, d.RoleIDs)
 	}
 }

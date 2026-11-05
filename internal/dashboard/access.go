@@ -51,11 +51,29 @@ func CanManage(m GuildMember, userID string) bool {
 	return perms&(PermAdministrator|PermManageGuild) != 0
 }
 
-// GuildAccess lets in the users listed in Allowed, and anyone who can manage
-// (Administrator or Manage Server) one of the bot's guilds.
+// GuildAccess lets in the users listed in Allowed, and members of the bot's
+// guilds (only GuildID when it is set) who either have one of RoleIDs or, when
+// RoleIDs is empty, can manage the guild (Administrator or Manage Server).
 type GuildAccess struct {
 	Allowed []string
 	Guilds  GuildSource
+	// GuildID, if set, is the only guild whose members may log in.
+	GuildID string
+	// RoleIDs, if set, replaces the manage check: any one of them lets in.
+	RoleIDs []string
+}
+
+// grants reports whether membership m lets userID in.
+func (a GuildAccess) grants(m GuildMember, userID string) bool {
+	if len(a.RoleIDs) == 0 {
+		return CanManage(m, userID)
+	}
+	for _, r := range m.MemberRoles {
+		if slices.Contains(a.RoleIDs, r) {
+			return true
+		}
+	}
+	return false
 }
 
 // Authorize implements Authorizer. A guild whose lookup fails does not deny
@@ -73,13 +91,17 @@ func (a GuildAccess) Authorize(ctx context.Context, userID string) (bool, error)
 		return false, nil
 	}
 	var errs []string
-	for _, gid := range a.Guilds.GuildIDs() {
+	guilds := a.Guilds.GuildIDs()
+	if a.GuildID != "" {
+		guilds = []string{a.GuildID}
+	}
+	for _, gid := range guilds {
 		m, found, err := a.Guilds.Member(ctx, gid, userID)
 		if err != nil {
 			errs = append(errs, fmt.Sprintf("guild %s: %v", gid, err))
 			continue
 		}
-		if found && CanManage(m, userID) {
+		if found && a.grants(m, userID) {
 			return true, nil
 		}
 	}

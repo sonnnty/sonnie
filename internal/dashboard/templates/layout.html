@@ -1,0 +1,29 @@
+{{define "top"}}<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="noindex, nofollow">
+<title>{{.Title}} · SONNIE</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/"><img src="/static/favicon.svg" alt="" width="24" height="24"> SONNIE</a>
+  {{if .User}}
+  <div class="who">
+    <span class="user" title="ผู้ใช้ที่เข้าสู่ระบบ">{{.User}}</span>
+    <form method="post" action="/auth/logout"><button type="submit" class="link-button">ออกจากระบบ</button></form>
+  </div>
+  {{end}}
+</header>
+<main>
+{{end}}
+
+{{define "bottom"}}
+</main>
+</body>
+</html>
+{{end}}

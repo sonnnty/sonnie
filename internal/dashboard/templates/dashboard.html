@@ -1,0 +1,14 @@
+{{define "dashboard"}}{{template "top" .}}
+<div class="status-line">
+  <span id="refresh-state" class="muted" aria-live="polite">กำลังโหลด…</span>
+</div>
+<div class="panels" id="panels">
+  {{range .Panels}}
+  <section class="card panel" id="panel-{{.ID}}" data-panel="{{.ID}}">
+    <h2>{{.Title}}</h2>
+    <div class="panel-body"><p class="muted">กำลังโหลด…</p></div>
+  </section>
+  {{end}}
+</div>
+<script src="/static/app.js" defer></script>
+{{template "bottom" .}}{{end}}

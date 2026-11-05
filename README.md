@@ -234,16 +234,18 @@ session.
 
 1. The **first** `/tts join` in a server makes the bot join your voice channel
    and post a **public session card** (a compact Thai embed) in the text
-   channel you ran it in. You get a one-line private (ephemeral) confirmation.
+   channel you ran it in. You get a one-line private (ephemeral) confirmation
+   naming the voice assigned to you (e.g. `✅ เข้าร่วมแล้ว — … · เสียง Puck`).
 
    ```
    🔈 #ห้องเสียง · 3 นาทีที่แล้ว
-   👥 @a @b · #general
-   @c · #games
+   👥 @a 🎙️Puck, @b 🎙️Orus · #general
+   @c 🎙️Charon · #games
    /tts join เพื่อให้อ่าน · /tts leave เพื่อออก · ลบข้อความหลังอ่าน
    ```
 
-   The participants are mentions (they do not notify anyone), grouped by the
+   The participants are mentions (they do not notify anyone) with their
+   assigned voice, grouped by the
    channel they are read in; the footer (small text) says how to join and
    leave and what happens to messages. It reads `ลบข้อความเมื่อจบ` when
    `TTS_DELETE_AFTER=0` and `⚠️ ไม่มีสิทธิ์ลบข้อความ` (with an orange embed)
@@ -251,21 +253,34 @@ session.
    lets a restarted bot finish the session is hidden in the embed's URL (an
    embed without a title never shows it) and written to the log as
    `tts: session state …` on every change.
-2. Anyone else in **the same voice channel** runs `/tts join` **in the text
+2. **Voices per participant.** Each participant in a session speaks with their
+   own male voice from the pool (`TTS_VOICE_POOL`, defaulting to the 16
+   Gemini-TTS male voices: `Achird`, `Algenib`, `Algieba`, `Alnilam`, `Charon`,
+   `Enceladus`, `Fenrir`, `Iapetus`, `Orus`, `Puck`, `Rasalgethi`, `Sadachbia`,
+   `Sadaltager`, `Schedar`, `Umbriel`, `Zubenelgenubi`). A new participant gets
+   a random voice not yet handed out in the current round; once all pool voices
+   have been handed out in the session, a new round starts with the full pool
+   available again. You keep your voice for the whole session — including after
+   moving to another text channel, `/tts leave` + rejoin, or disconnecting from
+   voice and rejoining; a new session starts fresh. Run `/tts join voice:<choice>`
+   to pick a specific voice (or change your current one); a picked voice counts
+   as used in the current round. Each assignment logs
+   `tts: session voice guild=… user=… voice=… round=…`.
+3. Anyone else in **the same voice channel** runs `/tts join` **in the text
    channel they want read**. They are added. If that channel has no card yet,
    the bot posts one there; the cards in all channels are **edited** to show
    the new person. There is **one card per text channel** that has (or had)
    participants in the session, and every card lists everyone.
-3. Running `/tts join` again **in another text channel moves you**: from then
+4. Running `/tts join` again **in another text channel moves you**: from then
    on your messages are read there, no longer in the old channel, and the reply
-   says so. Running it again in the channel you are already read in changes
-   nothing.
-4. `/tts leave` removes you and edits all the cards. Leaving the voice
+   says so. Running it again in the channel you are already read in (without
+   changing `voice:`) changes nothing.
+5. `/tts leave` removes you and edits all the cards. Leaving the voice
    channel (disconnecting or moving to another voice channel) does the same
    without the command. When the last participant leaves, the session ends.
-5. While the session runs, each participant message is **deleted a few
+6. While the session runs, each participant message is **deleted a few
    seconds after it has been read aloud** (see below), in every channel.
-6. When a session ends (last participant left, nobody but bots left in the
+7. When a session ends (last participant left, nobody but bots left in the
    voice channel, the bot was disconnected or moved, or the bot shuts down),
    the bot **deletes the messages the participants wrote** in the channels they
    were read in during the session that are still there and turns every card
@@ -446,7 +461,8 @@ What works now:
 | `GOOGLE_TTS_API_KEY` | *(empty)* | Google Cloud Text-to-Speech API key (Chirp/Neural2 voices)   |
 | `GOOGLE_APPLICATION_CREDENTIALS` | *(empty)* | Service account JSON key file; required for Gemini-TTS, wins over the API key |
 | `TTS_LANG`           | `th`    | Language passed to the speech engine (`th`, `en`, `ja`, ...)  |
-| `TTS_VOICE`          | *(empty)* | Optional Google voice name override (e.g. `th-TH-Chirp3-HD-Achird`). With a Gemini model: the bare speaker name, default `Charon` |
+| `TTS_VOICE`          | *(empty)* | Fallback Google voice name when no per-participant session voice is attached (e.g. `th-TH-Chirp3-HD-Achird`, or bare speaker name `Charon` with a Gemini model) |
+| `TTS_VOICE_POOL`     | 16 Gemini male voices | Comma-separated pool of speaker voices handed out per participant in a session (`Achird,Algenib,Algieba,Alnilam,Charon,Enceladus,Fenrir,Iapetus,Orus,Puck,Rasalgethi,Sadachbia,Sadaltager,Schedar,Umbriel,Zubenelgenubi`). When `TTS_MODEL` is empty, bare names map to `<lang>-Chirp3-HD-<Name>` |
 | `TTS_MODEL`          | *(empty)* | Gemini-TTS model, e.g. `gemini-2.5-flash-tts`. Empty = Chirp/Neural2 as before (see [Gemini-TTS](#gemini-tts)) |
 | `TTS_PROMPT`         | *(empty)* | Style prompt sent as `input.prompt`; Gemini models only, ignored otherwise |
 | `TTS_STREAMING`      | `true` with a Gemini `TTS_MODEL`, else `false` | Gemini only: synthesize over the gRPC streaming API and start speaking at the first audio (see [Streaming](#streaming-gemini)). Needs `GOOGLE_APPLICATION_CREDENTIALS`. Ignored for Chirp/Neural2 |

@@ -868,33 +868,40 @@ func (m *Manager) RecoverGuild(ctx context.Context, guildID string) {
 		log.Printf("tts: guild %s: looking for unfinished sessions: %v", guildID, err)
 		return
 	}
-	for _, group := range groupOpenSessions(open) {
-		now := m.cfg.Now()
-		m.mu.Lock()
-		skip := false
-		for _, o := range group {
-			skip = skip || m.recovered[o.MessageID]
-			m.recovered[o.MessageID] = true
+	// Drop the live session's own cards and cards already recovered before
+	// grouping: grouping is by voice channel, so a live card mixed into a
+	// crashed session's group would make the whole group look live.
+	m.mu.Lock()
+	live := m.sessions[guildID]
+	pending := open[:0:0]
+	for _, o := range open {
+		if m.recovered[o.MessageID] {
+			continue
 		}
+		if live != nil {
+			if cd, ok := live.cards[o.ChannelID]; ok && cd.messageID == o.MessageID {
+				continue
+			}
+		}
+		m.recovered[o.MessageID] = true
+		pending = append(pending, o)
+	}
+	m.mu.Unlock()
+
+	for _, group := range groupOpenSessions(pending) {
+		now := m.cfg.Now()
 		// A session started since the restart that has a card in the same
 		// channel owns everything in it from its own card on.
 		endedIn := make(map[string]time.Time)
+		m.mu.Lock()
 		if live := m.sessions[guildID]; live != nil {
 			for _, o := range group {
-				if cd, ok := live.cards[o.ChannelID]; ok {
-					if cd.messageID == o.MessageID {
-						skip = true
-					}
-					if cd.created.Before(now) {
-						endedIn[o.ChannelID] = cd.created
-					}
+				if cd, ok := live.cards[o.ChannelID]; ok && !cd.created.After(now) {
+					endedIn[o.ChannelID] = cd.created
 				}
 			}
 		}
 		m.mu.Unlock()
-		if skip {
-			continue
-		}
 
 		e := recoveredSession(guildID, group, now)
 		e.endedIn = endedIn

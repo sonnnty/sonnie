@@ -32,6 +32,23 @@ func (e *env) cardIn(channel string) string {
 	return ""
 }
 
+// lastBotMessage returns the ID of the newest message the bot posted in channel.
+func (e *env) lastBotMessage(channel string) string {
+	e.t.Helper()
+	e.msgr.mu.Lock()
+	defer e.msgr.mu.Unlock()
+	last := ""
+	for _, m := range e.msgr.channels[channel] {
+		if m.author == e.msgr.botID {
+			last = m.id
+		}
+	}
+	if last == "" {
+		e.t.Fatalf("no bot message in %s", channel)
+	}
+	return last
+}
+
 func (e *env) cardText(channel string) string {
 	e.t.Helper()
 	return e.msgr.embed(e.cardIn(channel)).Description
@@ -565,7 +582,14 @@ func TestMultiChannel_RecoveryStopsAtALiveSessionsCardInTheSameChannel(t *testin
 	e.joinAt("u1", "t1")
 	liveT1, _ := e.sayIn("t1", "u1", "live")
 	liveT2 := e.msgr.add("t2", "u2", e.clock.advance(time.Second)) // u2 is not in the live session
-	e.msgr.open = map[string][]OpenSession{"g1": cards}
+	// The scan of t1 finds the live card too (same voice channel as the
+	// lost session), as discordMessenger.OpenSessions would.
+	liveCard := e.lastBotMessage("t1")
+	if liveCard == ids["t1"] {
+		t.Fatal("no live card was posted in t1")
+	}
+	live := OpenSession{GuildID: "g1", ChannelID: "t1", MessageID: liveCard, Time: e.clock.now(), Marker: e.liveMarker(liveCard)}
+	e.msgr.open = map[string][]OpenSession{"g1": {live, cards[0], cards[1]}}
 
 	e.m.RecoverGuild(context.Background(), "g1")
 	e.m.Wait()

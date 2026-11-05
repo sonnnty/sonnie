@@ -232,7 +232,7 @@ func (e *env) liveMarker(messageID string) SessionMarker {
 
 func (e *env) assertEnded(guild string) {
 	e.t.Helper()
-	if _, _, ok := e.m.Bound(guild); ok {
+	if _, ok := e.m.Bound(guild); ok {
 		e.t.Fatal("session still active")
 	}
 }
@@ -259,8 +259,11 @@ func TestManager_FirstJoinStartsSessionWithOneMessage(t *testing.T) {
 	if len(e.j.joins) != 1 || e.j.joins[0] != "g1/v1" {
 		t.Fatalf("voice joins %v", e.j.joins)
 	}
-	if text, vc, ok := e.m.Bound("g1"); !ok || text != "t1" || vc != "v1" {
-		t.Fatalf("unexpected session: %q %q %v", text, vc, ok)
+	if vc, ok := e.m.Bound("g1"); !ok || vc != "v1" {
+		t.Fatalf("unexpected session: %q %v", vc, ok)
+	}
+	if ch, ok := e.m.TextChannel("g1", "u1"); !ok || ch != "t1" {
+		t.Fatalf("u1 is read in %q %v, want t1", ch, ok)
 	}
 	if n := e.botMessages("t1"); n != 1 {
 		t.Fatalf("%d session messages posted, want 1", n)
@@ -270,7 +273,7 @@ func TestManager_FirstJoinStartsSessionWithOneMessage(t *testing.T) {
 		t.Fatalf("session embed %+v", emb)
 	}
 	mk := e.liveMarker(e.sessionMessage())
-	if mk.Voice != "v1" || !mk.Manage || len(mk.Participants) != 1 {
+	if mk.Voice != "v1" || len(mk.Channels) != 1 || !mk.Channels[0].Manage || len(mk.Participants) != 1 {
 		t.Fatalf("marker %+v", mk)
 	}
 }
@@ -346,7 +349,7 @@ func TestManager_LaterJoinEditsTheSameMessage(t *testing.T) {
 		t.Fatalf("%d edits, want 1", e.msgr.editCount())
 	}
 	emb := e.msgr.embed(msgID)
-	if !strings.Contains(emb.Description, "👥 <@u1> <@u2>") {
+	if !strings.Contains(emb.Description, "👥 <@u1> <@u2> · <#t1>") {
 		t.Fatalf("description %q", emb.Description)
 	}
 	if mk := e.liveMarker(msgID); len(mk.Participants) != 2 {
@@ -379,10 +382,10 @@ func TestManager_JoinRefusals(t *testing.T) {
 		_, err := e.join("u2", "v2", "t1")
 
 		var busy *BusyError
-		if !errors.As(err, &busy) || busy.VoiceChannelID != "v1" || busy.TextChannelID != "t1" {
-			t.Fatalf("expected BusyError for v1/t1, got %v", err)
+		if !errors.As(err, &busy) || busy.VoiceChannelID != "v1" {
+			t.Fatalf("expected BusyError for v1, got %v", err)
 		}
-		if _, vc, _ := e.m.Bound("g1"); vc != "v1" || len(e.j.joins) != 1 {
+		if vc, _ := e.m.Bound("g1"); vc != "v1" || len(e.j.joins) != 1 {
 			t.Fatal("the existing session must be left alone")
 		}
 		if got := e.m.Participants("g1"); len(got) != 1 || got[0] != "u1" {
@@ -398,23 +401,6 @@ func TestManager_JoinRefusals(t *testing.T) {
 		e.mustJoin("u1")
 		if _, err := e.join("u2", "v2", "t1"); !errors.As(err, new(*BusyError)) {
 			t.Fatalf("expected BusyError, got %v", err)
-		}
-	})
-	t.Run("other text channel", func(t *testing.T) {
-		e := newEnv(t)
-		e.mustJoin("u1")
-
-		_, err := e.join("u2", "v1", "t2")
-
-		var wrong *TextChannelError
-		if !errors.As(err, &wrong) || wrong.TextChannelID != "t1" {
-			t.Fatalf("expected TextChannelError naming t1, got %v", err)
-		}
-		if got := e.m.Participants("g1"); len(got) != 1 {
-			t.Fatalf("participants %v: the refused user must not be added", got)
-		}
-		if e.msgr.editCount() != 0 || len(e.msgr.channels["t2"]) != 0 {
-			t.Fatal("a refused join must not edit or post")
 		}
 	})
 }
@@ -434,8 +420,11 @@ func TestManager_JoinOtherVoiceChannelReplacesEmptySession(t *testing.T) {
 	if !e.j.conn(0).Disconnected() {
 		t.Fatal("old connection was not disconnected")
 	}
-	if text, vc, _ := e.m.Bound("g1"); text != "t2" || vc != "v2" {
-		t.Fatalf("session is %q/%q, want t2/v2", text, vc)
+	if vc, _ := e.m.Bound("g1"); vc != "v2" {
+		t.Fatalf("session is in %q, want v2", vc)
+	}
+	if ch, _ := e.m.TextChannel("g1", "u2"); ch != "t2" {
+		t.Fatalf("u2 is read in %q, want t2", ch)
 	}
 	// The old session was cleaned up and summarised; the new one has its own message.
 	if !strings.Contains(e.summaryOf(old), "ลบ 1 ข้อความ") || !e.msgr.isDeleted(mine) {
@@ -505,7 +494,7 @@ func TestManager_LeaveRemovesParticipantAndEditsMessage(t *testing.T) {
 	if _, queued := e.say("u2", "ยังอยู่"); !queued {
 		t.Fatal("the remaining participant is not read aloud")
 	}
-	if _, _, ok := e.m.Bound("g1"); !ok || e.j.conn(0).Disconnected() {
+	if _, ok := e.m.Bound("g1"); !ok || e.j.conn(0).Disconnected() {
 		t.Fatal("the session must continue while participants remain")
 	}
 }
@@ -610,7 +599,7 @@ func TestManager_KeepsSessionWhileHumansRemain(t *testing.T) {
 	e := newEnv(t)
 	e.mustJoin("u1")
 	e.m.HandleVoiceStateUpdate("g1")
-	if _, _, ok := e.m.Bound("g1"); !ok {
+	if _, ok := e.m.Bound("g1"); !ok {
 		t.Fatal("ended while humans were still in the channel")
 	}
 	if e.msgr.editCount() != 0 {
@@ -631,8 +620,11 @@ func TestManager_KeepsSessionWhenMoveCausedByJoin(t *testing.T) {
 	}
 	e.m.HandleVoiceStateUpdate("g1")
 
-	if text, vc, ok := e.m.Bound("g1"); !ok || text != "t2" || vc != "v2" {
-		t.Fatalf("expected session (t2, v2, true), got (%q, %q, %v)", text, vc, ok)
+	if vc, ok := e.m.Bound("g1"); !ok || vc != "v2" {
+		t.Fatalf("expected session (v2, true), got (%q, %v)", vc, ok)
+	}
+	if ch, _ := e.m.TextChannel("g1", "u2"); ch != "t2" {
+		t.Fatalf("u2 is read in %q, want t2", ch)
 	}
 	if !e.j.conn(0).Disconnected() || e.j.conn(1).Disconnected() {
 		t.Fatal("expected only the old connection to be disconnected")
@@ -821,9 +813,9 @@ func TestManager_RecoverFinishesUnfinishedSession(t *testing.T) {
 	mk := SessionMarker{Open: true, Started: started, Voice: "v1", Manage: true, Participants: []string{"u1"}, Left: []string{"u2"}}
 	e.msgr.mu.Lock()
 	e.msgr.find(sessionMsg).embed = sessionEmbed(sessionView{
-		TextChannelID: "t1", VoiceChannelID: "v1", Started: started, Manage: true,
-		Participants: mk.Participants, Left: mk.Left,
-	})
+		VoiceChannelID: "v1", Started: started, Channels: []MarkerChannel{{ID: "t1", Manage: true}},
+		Members: []member{{"u1", "t1"}}, Left: mk.Left,
+	}, "t1")
 	e.msgr.mu.Unlock()
 	m1 := e.msgr.add("t1", "u1", e.clock.advance(time.Minute))
 	m2 := e.msgr.add("t1", "u2", e.clock.advance(time.Minute))
@@ -861,7 +853,7 @@ func TestManager_RecoverTakesOverEachMessageOnce(t *testing.T) {
 	o := OpenSession{GuildID: "g1", ChannelID: "t1", MessageID: id, Time: started,
 		Marker: SessionMarker{Open: true, Started: started, Manage: true, Participants: []string{"u1"}}}
 	e.msgr.open = map[string][]OpenSession{"g1": {o}}
-	e.msgr.embedFor(id, sessionEmbed(sessionView{TextChannelID: "t1", Started: started, Manage: true}))
+	e.msgr.embedFor(id, sessionEmbed(sessionView{Started: started, Channels: []MarkerChannel{{ID: "t1", Manage: true}}}, "t1"))
 	e.msgr.add("t1", "u1", e.clock.advance(time.Second))
 
 	e.m.RecoverGuild(context.Background(), "g1")
@@ -889,7 +881,7 @@ func TestManager_RecoverLeavesLiveSessionAlone(t *testing.T) {
 	if len(e.msgr.bulk)+len(e.msgr.single) != 0 {
 		t.Fatal("a live session was cleaned up by recovery")
 	}
-	if _, _, ok := e.m.Bound("g1"); !ok {
+	if _, ok := e.m.Bound("g1"); !ok {
 		t.Fatal("live session was ended")
 	}
 }
@@ -898,7 +890,7 @@ func TestManager_RecoverStopsAtTheStartOfALiveSessionInTheSameChannel(t *testing
 	e := newEnv(t)
 	started := e.clock.now()
 	old := e.msgr.add("t1", "bot", started)
-	e.msgr.embedFor(old, sessionEmbed(sessionView{TextChannelID: "t1", Started: started, Manage: true}))
+	e.msgr.embedFor(old, sessionEmbed(sessionView{Started: started, Channels: []MarkerChannel{{ID: "t1", Manage: true}}}, "t1"))
 	oldMsg := e.msgr.add("t1", "u1", e.clock.advance(time.Minute))
 	e.clock.advance(time.Minute)
 

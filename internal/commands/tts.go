@@ -49,13 +49,13 @@ func init() {
 	register(Command{
 		Definition: &discordgo.ApplicationCommand{
 			Name:         "tts",
-			Description:  "Read this text channel aloud in your voice channel",
+			Description:  "Read your messages in this text channel aloud in your voice channel",
 			DMPermission: &dmPermission,
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Type:        discordgo.ApplicationCommandOptionSubCommand,
 					Name:        "join",
-					Description: "Join the read-aloud session; your messages here are read aloud, then deleted",
+					Description: "Join the read-aloud session; your messages in this channel are read aloud, then deleted",
 				},
 				{
 					Type:        discordgo.ApplicationCommandOptionSubCommand,
@@ -129,14 +129,10 @@ func ttsJoinReply(ctx context.Context, ctl TTSController, req readaloud.JoinRequ
 	res, err := ctl.Join(ctx, req)
 	if err != nil {
 		var busy *readaloud.BusyError
-		var wrongText *readaloud.TextChannelError
 		switch {
 		case errors.As(err, &busy):
-			return fmt.Sprintf("ตอนนี้บอทกำลังอ่านออกเสียงอยู่ในห้องเสียง <#%s> (ห้องข้อความ <#%s>) และยังมีคนอยู่ — ไปเข้าร่วมที่นั่น หรือรอให้จบก่อน",
-				busy.VoiceChannelID, busy.TextChannelID)
-		case errors.As(err, &wrongText):
-			return fmt.Sprintf("ห้องเสียงนี้กำลังอ่านจากห้องข้อความ <#%s> — ใช้ /tts join ในห้อง <#%s> แทน",
-				wrongText.TextChannelID, wrongText.TextChannelID)
+			return fmt.Sprintf("ตอนนี้บอทกำลังอ่านออกเสียงอยู่ในห้องเสียง <#%s> และยังมีคนอยู่ — ไปเข้าร่วมที่นั่น หรือรอให้จบก่อน",
+				busy.VoiceChannelID)
 		case errors.Is(err, readaloud.ErrSessionMessage):
 			log.Printf("tts: join guild %s channel %s: %v", req.GuildID, req.VoiceChannelID, err)
 			return "บอทส่งข้อความเซสชันในห้องนี้ไม่ได้ — ตรวจสอบว่าบอทมีสิทธิ์ View Channel, Send Messages และ Embed Links ในห้องนี้"
@@ -150,7 +146,11 @@ func ttsJoinReply(ctx context.Context, ctl TTSController, req readaloud.JoinRequ
 
 	switch {
 	case res.AlreadyIn:
-		return "คุณอยู่ในการอ่านนี้แล้ว"
+		return fmt.Sprintf("คุณอยู่ในการอ่านนี้แล้ว — ข้อความของคุณใน <#%s> ถูกอ่านอยู่", req.TextChannelID)
+	case res.Moved && !res.CanManage:
+		return fmt.Sprintf("✅ ย้ายแล้ว — จากนี้จะอ่านข้อความของคุณใน <#%s> แทน <#%s> (บอทไม่มีสิทธิ์ลบข้อความ)", req.TextChannelID, res.PreviousChannelID)
+	case res.Moved:
+		return fmt.Sprintf("✅ ย้ายแล้ว — จากนี้จะอ่านข้อความของคุณใน <#%s> แทน <#%s>", req.TextChannelID, res.PreviousChannelID)
 	case !res.CanManage:
 		return fmt.Sprintf("✅ เข้าร่วมแล้ว — ข้อความของคุณใน <#%s> จะถูกอ่าน (บอทไม่มีสิทธิ์ลบข้อความ)", req.TextChannelID)
 	default:

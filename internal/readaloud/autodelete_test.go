@@ -418,7 +418,7 @@ func TestAutoDelete_NothingScheduledAfterTheSessionEnded(t *testing.T) {
 	}
 	e.m.Wait()
 	// The player reports a message that finished just as the session ended.
-	e.m.scheduleDelete(s, "m999")
+	e.m.scheduleDelete(s, "t1", "m999")
 	if ft.scheduled() != 0 {
 		t.Fatal("a timer was set on an ended session")
 	}

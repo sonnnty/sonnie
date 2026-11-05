@@ -249,7 +249,8 @@ func TestDiscordMessenger_UnknownMessageMapsToGone(t *testing.T) {
 func sessionEmbedWithMarker(open bool, participants ...string) *discordgo.MessageEmbed {
 	return &discordgo.MessageEmbed{Footer: &discordgo.MessageEmbedFooter{
 		Text: "อัปเดตอัตโนมัติ\n" + readaloud.FormatSessionMarker(readaloud.SessionMarker{
-			Open: open, Started: time.Unix(1793000000, 0), Voice: "v1", Manage: true, Participants: participants,
+			Open: open, Started: time.Unix(1793000000, 0), Voice: "v1", Participants: participants,
+			Channels: []readaloud.MarkerChannel{{ID: "t1", Manage: true}},
 		}),
 	}}
 }
@@ -282,7 +283,7 @@ func TestDiscordMessenger_OpenSessions(t *testing.T) {
 	if fmt.Sprint(ids) != fmt.Sprint(want) {
 		t.Fatalf("found %v, want %v", ids, want)
 	}
-	if o := got[0]; len(o.Marker.Participants) != 2 || o.Marker.Voice != "v1" || !o.Marker.Manage || o.Time.IsZero() {
+	if o := got[0]; len(o.Marker.Participants) != 2 || o.Marker.Voice != "v1" || len(o.Marker.Channels) != 1 || !o.Marker.Channels[0].Manage || o.Time.IsZero() {
 		t.Fatalf("session %+v", o)
 	}
 }

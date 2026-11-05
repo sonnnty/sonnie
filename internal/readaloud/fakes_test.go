@@ -16,7 +16,10 @@ type fakeMessenger struct {
 
 	botID     string
 	canManage bool
-	clock     func() time.Time
+	// noManage lists channels where the bot lacks Manage Messages although
+	// canManage is set.
+	noManage map[string]bool
+	clock    func() time.Time
 
 	next     int
 	channels map[string][]*fakeMsg
@@ -101,10 +104,10 @@ func (f *fakeMessenger) Edit(_ context.Context, channelID, messageID string, e *
 	return nil
 }
 
-func (f *fakeMessenger) CanManageMessages(string) bool {
+func (f *fakeMessenger) CanManageMessages(channelID string) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.canManage
+	return f.canManage && !f.noManage[channelID]
 }
 
 func (f *fakeMessenger) MessagesAfter(_ context.Context, channelID, afterID string) ([]ChannelMessage, error) {

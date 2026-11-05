@@ -282,3 +282,25 @@ curl -X POST https://sonnie.tapb.ch/hooks/ci -H "X-Sonnie-Token: $TOKEN" \
 - Each call (time, hook, status, source IP, size; never the token or body) is
   listed on the dashboard's Webhooks panel and logged as `webhook: <hook> ->
   <status> from <ip> (<n> bytes)`.
+
+## Adding a command or a feature
+
+- **A command:** add a file under `internal/commands/` following `ping.go`: an
+  `init()` that calls `register()` with a `discordgo.ApplicationCommand`
+  definition and a handler. No other file needs to change. Commands that need
+  shared state (like `/tts`) still self-register in `init()`; they get their
+  dependencies through a small interface and a setter that the bot calls once at
+  startup (see `SetTTS` in `tts.go`). A command can also answer autocomplete
+  (`Command.Autocomplete`), its own buttons (`Command.Component`, for custom IDs
+  starting with `ComponentPrefix`) and forms (`Command.Modal`); see `event.go`.
+- **A dashboard panel:** every feature shows its state as one panel. Give it a
+  cheap, read-only status method (an in-memory snapshot, never a Discord call),
+  write a constructor in `internal/panels/` that returns a
+  `dashboard.Panel{ID, Title, Snapshot}`, test it with a fake, append it in
+  `dashboardPanels` in `internal/bot/dashboard.go`, and optionally add a
+  renderer under the same ID in `internal/dashboard/static/app.js` (DOM through
+  `el()`/`textContent` only, never `innerHTML`). Without a renderer the panel is
+  shown as plain JSON.
+- **Documentation:** update the Thai manual in `docs/manual/`, the operations
+  docs here, `.env.example` and, if essential, the README, in the same change
+  (see `CLAUDE.md`).

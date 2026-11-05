@@ -11,7 +11,13 @@
 </head>
 <body>
 <header class="topbar">
-  <a class="brand" href="/"><img src="/static/favicon.svg" alt="" width="24" height="24"> SONNIE</a>
+  <div class="nav-brand">
+    <a class="brand" href="/"><img src="/static/favicon.svg" alt="" width="24" height="24"> SONNIE</a>
+    <nav class="nav-links">
+      <a class="nav-link{{if eq .Nav "dashboard"}} active{{end}}" href="/">แดชบอร์ด</a>
+      <a class="nav-link{{if eq .Nav "docs"}} active{{end}}" href="/docs">คู่มือ</a>
+    </nav>
+  </div>
   {{if .User}}
   <div class="who">
     <span class="user" title="ผู้ใช้ที่เข้าสู่ระบบ">{{.User}}</span>

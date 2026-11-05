@@ -41,6 +41,14 @@ main { max-width: 1280px; margin: 0 auto; padding: 12px; }
   position: sticky; top: 0; z-index: 1;
 }
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; color: var(--text); text-decoration: none; }
+.nav-brand { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.nav-links { display: flex; align-items: center; gap: 8px; }
+.nav-link {
+  color: var(--muted); text-decoration: none; font-size: 14px; font-weight: 500;
+  padding: 4px 8px; border-radius: 6px; transition: color .15s, background .15s;
+}
+.nav-link:hover { color: var(--text); background: var(--chip); }
+.nav-link.active { color: var(--accent); background: var(--chip); font-weight: 600; }
 .who { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .user { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40vw; }
 .who form { margin: 0; }
@@ -89,3 +97,42 @@ th { color: var(--muted); font-weight: 600; border-top: 0; }
 }
 .log .hit { background: rgba(240, 177, 61, .35); }
 pre.raw { font: 12px/1.4 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
+
+/* Docs Layout */
+.docs-layout { display: flex; gap: 16px; align-items: flex-start; }
+.docs-sidebar { width: 280px; flex-shrink: 0; position: sticky; top: 60px; }
+.docs-toc h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); margin: 0 0 10px; }
+.docs-nav-list { list-style: none; margin: 0; padding: 0; }
+.docs-nav-link {
+  display: block; padding: 6px 10px; border-radius: 6px; color: var(--text);
+  text-decoration: none; font-size: 14px; line-height: 1.4; transition: background .15s, color .15s;
+}
+.docs-nav-link:hover { background: var(--chip); color: var(--accent); }
+.docs-nav-link.active { background: var(--chip); color: var(--accent); font-weight: 600; }
+
+.docs-content { flex: 1; min-width: 0; line-height: 1.65; }
+.docs-content h1 { font-size: 24px; margin: 0 0 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+.docs-content h2 { font-size: 18px; margin: 24px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+.docs-content h3 { font-size: 15px; margin: 18px 0 8px; }
+.docs-content p, .docs-content ul, .docs-content ol { margin: 0 0 14px; }
+.docs-content ul, .docs-content ol { padding-left: 24px; }
+.docs-content li { margin-bottom: 4px; }
+.docs-content hr { border: 0; border-top: 1px solid var(--border); margin: 24px 0; }
+.docs-content code { font-family: var(--mono); font-size: 13px; background: var(--chip); padding: 2px 6px; border-radius: 4px; }
+.docs-content pre { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px; overflow-x: auto; font-family: var(--mono); font-size: 13px; line-height: 1.5; margin: 0 0 14px; }
+.docs-content pre code { background: none; padding: 0; }
+.docs-content blockquote { margin: 14px 0; padding: 10px 16px; border-left: 4px solid var(--accent); background: var(--chip); border-radius: 0 8px 8px 0; }
+.docs-content blockquote p:last-child { margin-bottom: 0; }
+.docs-content table { margin: 16px 0; }
+.docs-content a.anchor {
+  float: left; margin-left: -20px; padding-right: 6px; color: var(--muted);
+  text-decoration: none; opacity: 0; font-weight: 400;
+}
+.docs-content h1:hover a.anchor,
+.docs-content h2:hover a.anchor,
+.docs-content h3:hover a.anchor { opacity: 0.8; }
+
+@media (max-width: 768px) {
+  .docs-layout { flex-direction: column; }
+  .docs-sidebar { width: 100%; position: static; }
+}

@@ -85,6 +85,7 @@ type Server struct {
 	pages   *template.Template
 	handler http.Handler
 	srv     *http.Server
+	docs    *docsStore
 
 	mu        sync.Mutex
 	authCache map[string]authEntry
@@ -114,9 +115,14 @@ func New(cfg Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	docs, err := newDocsStore()
+	if err != nil {
+		return nil, err
+	}
 	s := &Server{
 		cfg:       cfg,
 		pages:     pages,
+		docs:      docs,
 		authCache: map[string]authEntry{},
 		secure:    strings.HasPrefix(cfg.PublicURL, "https://"),
 	}
@@ -143,6 +149,9 @@ func (s *Server) routes() http.Handler {
 	static, _ := fs.Sub(staticFS, "static")
 	mux.Handle("GET /static/", http.StripPrefix("/static/", noCache(http.FileServerFS(static))))
 	mux.HandleFunc("GET /{$}", s.handleIndex)
+	mux.HandleFunc("GET /docs", s.handleDocsIndex)
+	mux.HandleFunc("GET /docs/", s.handleDocsIndex)
+	mux.HandleFunc("GET /docs/{slug}", s.handleDocsSlug)
 	mux.HandleFunc("GET /auth/login", s.handleLogin)
 	mux.HandleFunc("GET /auth/callback", s.handleCallback)
 	mux.HandleFunc("GET /auth/logout", s.handleLogout)
@@ -205,14 +214,17 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 
 // page is the data every template gets.
 type page struct {
-	Title   string
-	User    string
-	Heading string
-	Text    string
-	Hint    string
-	Link    string
-	LinkTo  string
-	Panels  []Panel
+	Title       string
+	User        string
+	Nav         string
+	Heading     string
+	Text        string
+	Hint        string
+	Link        string
+	LinkTo      string
+	Panels      []Panel
+	TOC         []DocItem
+	DocsContent template.HTML
 }
 
 func (s *Server) render(w http.ResponseWriter, status int, name string, p page) {
@@ -250,25 +262,72 @@ func (s *Server) forbidden(w http.ResponseWriter, user string) {
 	})
 }
 
-func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
+func (s *Server) checkAccessForPage(w http.ResponseWriter, r *http.Request, nav string) (Session, bool) {
 	if !s.login {
 		s.notConfigured(w)
-		return
+		return Session{}, false
 	}
 	sess, ok := s.session(r)
 	if !ok {
-		s.render(w, http.StatusOK, "login", page{Title: "เข้าสู่ระบบ"})
-		return
+		s.render(w, http.StatusOK, "login", page{Title: "เข้าสู่ระบบ", Nav: nav})
+		return Session{}, false
 	}
 	allowed, err := s.authorized(r.Context(), sess.UserID)
 	switch {
 	case err != nil:
 		s.message(w, http.StatusServiceUnavailable, sess.Name, "ตรวจสอบสิทธิ์ไม่ได้ชั่วคราว", "ติดต่อ Discord เพื่อตรวจสอบสิทธิ์ไม่สำเร็จ กรุณาลองใหม่อีกครั้งในอีกสักครู่")
+		return Session{}, false
 	case !allowed:
 		s.forbidden(w, sess.Name)
+		return Session{}, false
 	default:
-		s.render(w, http.StatusOK, "dashboard", page{Title: "แดชบอร์ด", User: sess.Name, Panels: s.cfg.Panels})
+		return sess, true
 	}
+}
+
+func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
+	sess, ok := s.checkAccessForPage(w, r, "dashboard")
+	if !ok {
+		return
+	}
+	s.render(w, http.StatusOK, "dashboard", page{Title: "แดชบอร์ด", User: sess.Name, Nav: "dashboard", Panels: s.cfg.Panels})
+}
+
+func (s *Server) handleDocsIndex(w http.ResponseWriter, r *http.Request) {
+	sess, ok := s.checkAccessForPage(w, r, "docs")
+	if !ok {
+		return
+	}
+	first := s.docs.firstSlug()
+	if first == "" {
+		s.message(w, http.StatusNotFound, sess.Name, "ไม่พบคู่มือ", "ยังไม่มีไฟล์คู่มือในระบบ")
+		return
+	}
+	http.Redirect(w, r, "/docs/"+first, http.StatusSeeOther)
+}
+
+func (s *Server) handleDocsSlug(w http.ResponseWriter, r *http.Request) {
+	sess, ok := s.checkAccessForPage(w, r, "docs")
+	if !ok {
+		return
+	}
+	slug := r.PathValue("slug")
+	if slug == "" {
+		s.handleDocsIndex(w, r)
+		return
+	}
+	content, item, ok := s.docs.render(slug)
+	if !ok {
+		s.message(w, http.StatusNotFound, sess.Name, "ไม่พบคู่มือหน้านี้", "ไม่พบเนื้อหาคู่มือสำหรับหัวข้อนี้ กรุณาเลือกจากสารบัญ")
+		return
+	}
+	s.render(w, http.StatusOK, "docs", page{
+		Title:       item.Title,
+		User:        sess.Name,
+		Nav:         "docs",
+		TOC:         s.docs.toc(slug),
+		DocsContent: content,
+	})
 }
 
 func (s *Server) handlePanels(w http.ResponseWriter, r *http.Request) {

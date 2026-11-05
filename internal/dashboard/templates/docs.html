@@ -1,0 +1,19 @@
+{{define "docs"}}{{template "top" .}}
+<div class="docs-layout">
+  <aside class="docs-sidebar">
+    <nav class="docs-toc card" aria-label="สารบัญคู่มือ">
+      <h2>สารบัญคู่มือ</h2>
+      <ul class="docs-nav-list">
+        {{range .TOC}}
+        <li>
+          <a class="docs-nav-link{{if .Active}} active{{end}}" href="/docs/{{.Slug}}">{{.Title}}</a>
+        </li>
+        {{end}}
+      </ul>
+    </nav>
+  </aside>
+  <article class="docs-content card">
+    {{.DocsContent}}
+  </article>
+</div>
+{{template "bottom" .}}{{end}}

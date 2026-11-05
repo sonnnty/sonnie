@@ -16,13 +16,12 @@ A general-purpose Discord bot written in Go, grown one command at a time. It bui
 
 ## Documentation
 
-- **คู่มือผู้ใช้ (User Manual)**:
-  - บนแดชบอร์ด: [https://sonnie.tapb.ch/docs](https://sonnie.tapb.ch/docs)
-  - ไฟล์ Markdown ในคลังโค้ด: [`docs/manual/`](docs/manual/)
-- **คู่มือผู้ดูแลระบบและคอนฟิก (Operations Reference)**:
-  - ข้อมูลสถาปัตยกรรม, ตัวแปรสภาพแวดล้อมทั้งหมด, การกู้คืนสถานะ, และรายละเอียดเทคนิค: [`docs/operations.md`](docs/operations.md)
-- **Voice Transport & DAVE Encryption**:
-  - รายละเอียดเอนจินเสียงและการเข้ารหัส E2EE: [`docs/voice-transport.md`](docs/voice-transport.md)
+- **คู่มือผู้ใช้ (User Manual, Thai)**: on the dashboard at [https://sonnie.tapb.ch/docs](https://sonnie.tapb.ch/docs); source in [`docs/manual/`](docs/manual/).
+- **Operations & maintainer reference** (setup, environment variables, dashboard login, webhooks, releases): [`docs/operations.md`](docs/operations.md), with details per feature:
+  - [`docs/tts-operations.md`](docs/tts-operations.md): `/tts` setup (Message Content intent, permissions and invite URL, Google keys, Gemini service account), sessions, clean-up and recovery, streaming
+  - [`docs/tts-cost-and-persistence.md`](docs/tts-cost-and-persistence.md): prices, the monthly budget meter, alerts, state kept in Discord across restarts
+  - [`docs/events-operations.md`](docs/events-operations.md): `/event` forms, time formats, covers and licensing, reminders
+- **Voice transport & DAVE encryption**: [`docs/voice-transport.md`](docs/voice-transport.md)
 
 ---
 
@@ -58,7 +57,8 @@ The bot is configured entirely via environment variables. For the full list of o
 | `DASHBOARD_PUBLIC_URL` | *(empty)* | Browser URL, e.g. `https://sonnie.tapb.ch` |
 | `DISCORD_CLIENT_SECRET` | *(empty)* | OAuth2 client secret for dashboard login (**secret**) |
 | `DASHBOARD_SESSION_KEY` | *(empty)* | ≥ 32 random bytes for AES-256-GCM session cookie (**secret**) |
-| `DASHBOARD_ROLE_IDS` | *(empty)* | Role IDs in `DASHBOARD_GUILD_ID` allowed to view dashboard (e.g. TABP role) |
+| `DASHBOARD_GUILD_ID` | *(empty)* | Server whose members may log in (needed with `DASHBOARD_ROLE_IDS`) |
+| `DASHBOARD_ROLE_IDS` | *(empty)* | Role IDs (e.g. TABP) that let members of `DASHBOARD_GUILD_ID` in; replaces the Administrator/Manage Server rule |
 | `WEBHOOKS` | *(empty)* | `name=token@channelID,...` incoming webhook definitions (**secret**) |
 
 ---
@@ -72,9 +72,11 @@ docker build --build-arg VERSION=$(git rev-parse --short HEAD) -t sonnie .
 docker run --rm --env-file .env -p 8080:8080 sonnie
 ```
 
+Releases are git tags `vX.Y.Z` on `main` with the image `rg.tapb.ch/sonnie:X.Y.Z` built with `--build-arg VERSION=X.Y.Z` (see [`docs/operations.md`](docs/operations.md#releases)).
+
 ---
 
 ## Adding Commands & Features
 
 - **New slash commands**: Add a file under `internal/commands/` calling `register(...)` in `init()` (see `ping.go` or `event.go`).
-- **Dashboard panels & documentation rule**: Every feature must register a status panel in `internal/panels/` and update `docs/manual/` and `docs/operations.md` in the same change (see [`CLAUDE.md`](CLAUDE.md)).
+- **Dashboard panels & documentation rule**: Every feature must register a status panel in `internal/panels/` and update `docs/manual/` and the operations docs in `docs/` in the same change (see [`CLAUDE.md`](CLAUDE.md)).

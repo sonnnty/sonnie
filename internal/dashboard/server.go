@@ -248,7 +248,7 @@ func (s *Server) notConfigured(w http.ResponseWriter) {
 		Title:   "ยังไม่ได้ตั้งค่าแดชบอร์ด",
 		Heading: "ยังไม่ได้ตั้งค่าการเข้าสู่ระบบ",
 		Text:    "แดชบอร์ดต้องใช้การเข้าสู่ระบบด้วย Discord แต่ยังตั้งค่าไม่ครบ",
-		Hint:    "ตั้งค่า DISCORD_CLIENT_SECRET, DASHBOARD_PUBLIC_URL และ DASHBOARD_SESSION_KEY แล้วรีสตาร์ตบอท (ดู README หัวข้อ Dashboard & webhooks)",
+		Hint:    "ตั้งค่า DISCORD_CLIENT_SECRET, DASHBOARD_PUBLIC_URL และ DASHBOARD_SESSION_KEY แล้วรีสตาร์ตบอท (ดู docs/operations.md หัวข้อ Dashboard)",
 	})
 }
 

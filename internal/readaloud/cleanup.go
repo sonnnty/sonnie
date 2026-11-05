@@ -26,15 +26,16 @@ type CleanupResult struct {
 	NoPermission bool
 }
 
-// cleanupJob describes which messages a finished session leaves behind.
+// cleanupJob describes which messages a finished session leaves behind in one
+// text channel. A session with several channels runs one job per channel.
 type cleanupJob struct {
 	ChannelID        string
 	SessionMessageID string
 	// Started is when the session message was created, Ended when the session
 	// ended. Only messages in between are deleted.
 	Started, Ended time.Time
-	// Participants is everyone who was in the session at any time, with when
-	// they first joined. Only their messages from that time on are deleted;
+	// Participants is everyone who was bound to this channel at any time, with
+	// when they first joined it. Only their messages from that time on are deleted;
 	// a zero time means from the session start (used after a restart, when
 	// join times are not known).
 	Participants map[string]time.Time
@@ -48,9 +49,9 @@ type candidate struct {
 	time time.Time
 }
 
-// cleanupMessages deletes the messages participants posted in the session's
-// text channel between their first join (or the session message) and the end
-// of the session. The
+// cleanupMessages deletes the messages participants posted in one of the
+// session's text channels between their first join there (or the card) and the
+// end of the session. The
 // history scan is authoritative: it sees messages the bot missed (a restart,
 // a dropped event) and leaves out ones people already deleted themselves. If
 // the scan fails or is incomplete, the live-tracked IDs are added so nothing

@@ -11,6 +11,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 
 	"github.com/Sonty15/SONNIE/internal/readaloud"
+	"github.com/Sonty15/SONNIE/internal/tts"
 	"github.com/Sonty15/SONNIE/internal/usage"
 )
 
@@ -40,9 +41,45 @@ var ttsController TTSController
 // session is opened; it is not safe to call while handlers are running.
 func SetTTS(c TTSController) {
 	ttsController = c
+	var pool []string
+	if vp, ok := c.(interface{ VoicePool() []string }); ok && vp != nil {
+		pool = vp.VoicePool()
+	}
+	setJoinVoiceChoices(pool)
 }
 
-const ttsJoinTimeout = 15 * time.Second
+const (
+	ttsJoinTimeout  = 15 * time.Second
+	maxVoiceChoices = 25
+)
+
+var joinVoiceOption = &discordgo.ApplicationCommandOption{
+	Type:        discordgo.ApplicationCommandOptionString,
+	Name:        "voice",
+	Description: "Male voice for your messages in this session (default: random unused voice)",
+	Choices:     voiceOptionChoices(tts.DefaultVoicePool),
+}
+
+func setJoinVoiceChoices(pool []string) {
+	joinVoiceOption.Choices = voiceOptionChoices(pool)
+}
+
+func voiceOptionChoices(pool []string) []*discordgo.ApplicationCommandOptionChoice {
+	if len(pool) == 0 {
+		pool = tts.DefaultVoicePool
+	}
+	if len(pool) > maxVoiceChoices {
+		pool = pool[:maxVoiceChoices]
+	}
+	choices := make([]*discordgo.ApplicationCommandOptionChoice, len(pool))
+	for i, v := range pool {
+		choices[i] = &discordgo.ApplicationCommandOptionChoice{
+			Name:  v,
+			Value: v,
+		}
+	}
+	return choices
+}
 
 func init() {
 	dmPermission := false
@@ -56,6 +93,7 @@ func init() {
 					Type:        discordgo.ApplicationCommandOptionSubCommand,
 					Name:        "join",
 					Description: "Join the read-aloud session; your messages in this channel are read aloud, then deleted",
+					Options:     []*discordgo.ApplicationCommandOption{joinVoiceOption},
 				},
 				{
 					Type:        discordgo.ApplicationCommandOptionSubCommand,
@@ -107,6 +145,12 @@ func handleTTS(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			log.Printf("tts: failed to defer interaction: %v", err)
 			return
 		}
+		var pickedVoice string
+		for _, opt := range options[0].Options {
+			if opt.Name == "voice" {
+				pickedVoice = opt.StringValue()
+			}
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), ttsJoinTimeout)
 		defer cancel()
 		reply := ttsJoinReply(ctx, ctl, readaloud.JoinRequest{
@@ -114,6 +158,7 @@ func handleTTS(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			UserID:         userID,
 			VoiceChannelID: vs.ChannelID,
 			TextChannelID:  i.ChannelID,
+			Voice:          pickedVoice,
 		})
 		if _, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{Content: &reply}); err != nil {
 			log.Printf("tts: failed to edit interaction response: %v", err)
@@ -144,17 +189,25 @@ func ttsJoinReply(ctx context.Context, ctl TTSController, req readaloud.JoinRequ
 		return "บอทเข้าห้องเสียงของคุณไม่ได้ — ตรวจสอบว่าบอทมีสิทธิ์ Connect และ Speak ในห้องนั้น หรือลองใหม่หากการเชื่อมต่อเสียงล้มเหลว"
 	}
 
+	suffix := ""
+	if res.Voice != "" {
+		suffix = " · เสียง " + res.Voice
+	}
 	switch {
 	case res.AlreadyIn:
-		return fmt.Sprintf("คุณอยู่ในการอ่านนี้แล้ว — ข้อความของคุณใน <#%s> ถูกอ่านอยู่", req.TextChannelID)
+		return fmt.Sprintf("คุณอยู่ในการอ่านนี้แล้ว — ข้อความของคุณใน <#%s> ถูกอ่านอยู่%s", req.TextChannelID, suffix)
+	case res.VoiceChanged && !res.CanManage:
+		return fmt.Sprintf("✅ เปลี่ยนเสียงแล้ว — ข้อความของคุณใน <#%s> จะถูกอ่าน (บอทไม่มีสิทธิ์ลบข้อความ)%s", req.TextChannelID, suffix)
+	case res.VoiceChanged:
+		return fmt.Sprintf("✅ เปลี่ยนเสียงแล้ว — ข้อความของคุณใน <#%s> จะถูกอ่านแล้วลบ%s", req.TextChannelID, suffix)
 	case res.Moved && !res.CanManage:
-		return fmt.Sprintf("✅ ย้ายแล้ว — จากนี้จะอ่านข้อความของคุณใน <#%s> แทน <#%s> (บอทไม่มีสิทธิ์ลบข้อความ)", req.TextChannelID, res.PreviousChannelID)
+		return fmt.Sprintf("✅ ย้ายแล้ว — จากนี้จะอ่านข้อความของคุณใน <#%s> แทน <#%s> (บอทไม่มีสิทธิ์ลบข้อความ)%s", req.TextChannelID, res.PreviousChannelID, suffix)
 	case res.Moved:
-		return fmt.Sprintf("✅ ย้ายแล้ว — จากนี้จะอ่านข้อความของคุณใน <#%s> แทน <#%s>", req.TextChannelID, res.PreviousChannelID)
+		return fmt.Sprintf("✅ ย้ายแล้ว — จากนี้จะอ่านข้อความของคุณใน <#%s> แทน <#%s>%s", req.TextChannelID, res.PreviousChannelID, suffix)
 	case !res.CanManage:
-		return fmt.Sprintf("✅ เข้าร่วมแล้ว — ข้อความของคุณใน <#%s> จะถูกอ่าน (บอทไม่มีสิทธิ์ลบข้อความ)", req.TextChannelID)
+		return fmt.Sprintf("✅ เข้าร่วมแล้ว — ข้อความของคุณใน <#%s> จะถูกอ่าน (บอทไม่มีสิทธิ์ลบข้อความ)%s", req.TextChannelID, suffix)
 	default:
-		return fmt.Sprintf("✅ เข้าร่วมแล้ว — ข้อความของคุณใน <#%s> จะถูกอ่านแล้วลบ", req.TextChannelID)
+		return fmt.Sprintf("✅ เข้าร่วมแล้ว — ข้อความของคุณใน <#%s> จะถูกอ่านแล้วลบ%s", req.TextChannelID, suffix)
 	}
 }
 

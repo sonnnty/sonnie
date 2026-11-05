@@ -369,3 +369,46 @@ func TestOpenStream_WrapsUnarySynthesizer(t *testing.T) {
 		t.Fatal("want the synthesizer's error")
 	}
 }
+
+func TestGoogleStream_UsesPerMessageVoiceOnStreamAndRESTFallback(t *testing.T) {
+	t.Run("stream uses context voice", func(t *testing.T) {
+		captureLog(t)
+		var gotVoice string
+		open := grpcOpener(t, func(stream texttospeechpb.TextToSpeech_StreamingSynthesizeServer) error {
+			cfg, _, err := readRequests(stream)
+			if err != nil {
+				return err
+			}
+			gotVoice = cfg.GetVoice().GetName()
+			return send(stream, "audio")
+		})
+		rest, _ := restServer(t, []byte("unused"))
+		g := &GoogleStream{REST: rest, Open: open}
+		if _, err := g.Synthesize(WithVoice(context.Background(), "Orus"), "สวัสดี", "th"); err != nil {
+			t.Fatal(err)
+		}
+		if gotVoice != "Orus" {
+			t.Fatalf("stream got voice %q, want Orus", gotVoice)
+		}
+	})
+
+	t.Run("rest fallback uses context voice", func(t *testing.T) {
+		captureLog(t)
+		srv, body := captureBody(t)
+		g := &GoogleStream{
+			REST: &Google{
+				Endpoint: srv.URL, Client: srv.Client(),
+				Model: "gemini-2.5-flash-tts", Voice: "Charon",
+			},
+			Open: grpcOpener(t, func(texttospeechpb.TextToSpeech_StreamingSynthesizeServer) error {
+				return status.Error(codes.Unavailable, "down")
+			}),
+		}
+		if _, err := g.Synthesize(WithVoice(context.Background(), "Fenrir"), "สวัสดี", "th"); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(*body, `"name":"Fenrir"`) {
+			t.Fatalf("REST fallback body %s missing Fenrir", *body)
+		}
+	})
+}

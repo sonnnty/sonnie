@@ -32,6 +32,7 @@ func newReadAloud(s *discordgo.Session, cfg config.TTSConfig) (*readaloud.Manage
 		Messenger: newDiscordMessenger(s),
 
 		Lang:        cfg.Lang,
+		VoicePool:   cfg.VoicePool,
 		MaxChars:    cfg.MaxChars,
 		QueueSize:   cfg.QueueSize,
 		SpeakAuthor: cfg.SpeakAuthor,

@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"log"
 	"maps"
+	"math/rand/v2"
 	"slices"
 	"strings"
 	"sync"
@@ -83,6 +84,7 @@ type Config struct {
 	Messenger Messenger
 
 	Lang        string
+	VoicePool   []string
 	MaxChars    int
 	QueueSize   int
 	SpeakAuthor bool
@@ -91,6 +93,9 @@ type Config struct {
 	// end-of-session clean-up.
 	DeleteAfter time.Duration
 
+	// RandIntn returns a random integer in [0, n) for voice assignment; nil
+	// means math/rand/v2.IntN. For tests.
+	RandIntn func(n int) int
 	// Now returns the current time; nil means time.Now. For tests.
 	Now func() time.Time
 	// AfterFunc runs f after d; nil means time.AfterFunc. For tests.
@@ -179,6 +184,14 @@ type Manager struct {
 
 // New creates a Manager.
 func New(cfg Config) *Manager {
+	if len(cfg.VoicePool) == 0 {
+		cfg.VoicePool = slices.Clone(tts.DefaultVoicePool)
+	} else {
+		cfg.VoicePool = slices.Clone(cfg.VoicePool)
+	}
+	if cfg.RandIntn == nil {
+		cfg.RandIntn = rand.IntN
+	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
@@ -221,6 +234,8 @@ type JoinRequest struct {
 	// channel they ran the command in, which is where their messages are read.
 	VoiceChannelID string
 	TextChannelID  string
+	// Voice, if non-empty, is the speaker voice picked with /tts join voice:.
+	Voice string
 }
 
 // JoinResult describes what a successful Join did.
@@ -228,13 +243,18 @@ type JoinResult struct {
 	// Started is true when this call created the session; otherwise the user
 	// was added to an existing one.
 	Started bool
-	// AlreadyIn is true when the user was already read in this text channel;
-	// nothing changed.
+	// AlreadyIn is true when the user was already read in this text channel
+	// and did not change their voice; nothing changed.
 	AlreadyIn bool
 	// Moved is true when the user was a participant already and is now read in
 	// another text channel (PreviousChannelID).
 	Moved             bool
 	PreviousChannelID string
+	// VoiceChanged is true when an existing participant in the same text
+	// channel picked a new voice with /tts join voice:.
+	VoiceChanged bool
+	// Voice is the speaker voice assigned to the user for this session.
+	Voice string
 	// Participants is how many users are in the session now.
 	Participants int
 	// CanManage is false when the bot lacks Manage Messages in the text
@@ -284,8 +304,10 @@ func (m *Manager) addParticipant(ctx context.Context, s *session, req JoinReques
 	_, haveCard := s.cards[req.TextChannelID]
 	m.mu.Unlock()
 
-	if in && prev == req.TextChannelID {
-		return JoinResult{AlreadyIn: true, Participants: len(view.Members), CanManage: view.manageIn(prev)}, nil
+	picked := strings.TrimSpace(req.Voice)
+	currentVoice := view.voiceOf(req.UserID)
+	if in && prev == req.TextChannelID && (picked == "" || picked == currentVoice) {
+		return JoinResult{AlreadyIn: true, Voice: currentVoice, Participants: len(view.Members), CanManage: view.manageIn(prev)}, nil
 	}
 
 	// A channel without a card gets one; the card is posted before anything
@@ -295,6 +317,7 @@ func (m *Manager) addParticipant(ctx context.Context, s *session, req JoinReques
 		manage = m.cfg.Messenger.CanManageMessages(req.TextChannelID)
 	}
 	next := view.join(req.UserID, req.TextChannelID, manage, m.cfg.Now())
+	next, speaker, assigned := next.assignVoice(req.UserID, picked, m.cfg.VoicePool, m.cfg.RandIntn)
 	var posted *card
 	if !haveCard {
 		id, created, err := m.cfg.Messenger.Post(ctx, req.TextChannelID, sessionEmbed(next, req.TextChannelID))
@@ -314,6 +337,10 @@ func (m *Manager) addParticipant(ctx context.Context, s *session, req JoinReques
 	}
 	m.mu.Unlock()
 
+	if assigned {
+		log.Printf("tts: session voice guild=%s user=%s voice=%s round=%d",
+			s.guildID, req.UserID, speaker, next.VoiceRound)
+	}
 	log.Printf("tts: session join guild=%s text=%s user=%s moved_from=%q new_card=%t participants=%d",
 		s.guildID, req.TextChannelID, req.UserID, prev, posted != nil, len(next.Members))
 	skip := ""
@@ -321,7 +348,15 @@ func (m *Manager) addParticipant(ctx context.Context, s *session, req JoinReques
 		skip = req.TextChannelID // posted with the current state already
 	}
 	m.editCards(s, next, skip)
-	return JoinResult{Moved: in, PreviousChannelID: prev, Participants: len(next.Members), CanManage: manage}, nil
+	sameChannel := in && prev == req.TextChannelID
+	return JoinResult{
+		Moved:             in && !sameChannel,
+		PreviousChannelID: prev,
+		VoiceChanged:      sameChannel && assigned,
+		Voice:             speaker,
+		Participants:      len(next.Members),
+		CanManage:         manage,
+	}, nil
 }
 
 // start connects to the voice channel, posts the first card and registers the
@@ -350,6 +385,8 @@ func (m *Manager) start(ctx context.Context, req JoinRequest) (JoinResult, error
 		Started:        s.started,
 		PerMessage:     m.cfg.DeleteAfter > 0,
 	}.join(req.UserID, req.TextChannelID, manage, time.Time{})
+	var speaker string
+	s.view, speaker, _ = s.view.assignVoice(req.UserID, req.Voice, m.cfg.VoicePool, m.cfg.RandIntn)
 	logMarker(req.GuildID, s.view)
 	id, created, err := m.cfg.Messenger.Post(ctx, req.TextChannelID, sessionEmbed(s.view, req.TextChannelID))
 	if err != nil {
@@ -386,9 +423,11 @@ func (m *Manager) start(ctx context.Context, req JoinRequest) (JoinResult, error
 	m.sessions[req.GuildID] = s
 	m.mu.Unlock()
 
+	log.Printf("tts: session voice guild=%s user=%s voice=%s round=%d",
+		req.GuildID, req.UserID, speaker, s.view.VoiceRound)
 	log.Printf("tts: session start guild=%s text=%s voice=%s user=%s message=%s can_manage_messages=%t",
 		req.GuildID, req.TextChannelID, req.VoiceChannelID, req.UserID, id, manage)
-	return JoinResult{Started: true, Participants: 1, CanManage: manage}, nil
+	return JoinResult{Started: true, Voice: speaker, Participants: 1, CanManage: manage}, nil
 }
 
 // LeaveResult describes what a successful Leave did.
@@ -511,6 +550,23 @@ func (m *Manager) Participants(guildID string) []string {
 	return nil
 }
 
+// VoicePool returns a copy of the configured speaker voice pool.
+func (m *Manager) VoicePool() []string {
+	return slices.Clone(m.cfg.VoicePool)
+}
+
+// Voice returns the speaker voice assigned to userID in guildID's session, if
+// any (including after they have left the session while it is still active).
+func (m *Manager) Voice(guildID, userID string) (string, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if s := m.sessions[guildID]; s != nil {
+		v := s.view.voiceOf(userID)
+		return v, v != ""
+	}
+	return "", false
+}
+
 // HandleMessage queues msg for speech if its author is a participant and it
 // was sent in the text channel that participant joined from, and it survives
 // filtering. It reports whether something was queued. A message of anyone who
@@ -538,6 +594,7 @@ func (m *Manager) HandleMessage(msg Message, names Names) bool {
 	}
 	readIn, isParticipant := s.view.channelOf(msg.AuthorID)
 	speak := isParticipant && readIn == msg.ChannelID
+	speakerVoice := s.view.voiceOf(msg.AuthorID)
 	player := s.player
 	m.mu.Unlock()
 
@@ -560,7 +617,7 @@ func (m *Manager) HandleMessage(msg Message, names Names) bool {
 	// Spoken, dropped from a full queue or failed: in every case the player is
 	// done with the message, which is when its delay starts. A message cut off
 	// by the end of the session is left to the end-of-session clean-up.
-	player.EnqueueWith(Utterance(msg.AuthorName, text, m.cfg.SpeakAuthor), func(bool) {
+	player.EnqueueVoice(Utterance(msg.AuthorName, text, m.cfg.SpeakAuthor), speakerVoice, func(bool) {
 		m.scheduleDelete(s, msg.ChannelID, msg.MessageID)
 	})
 	return true

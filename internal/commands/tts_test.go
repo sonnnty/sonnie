@@ -13,6 +13,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 
 	"github.com/Sonty15/SONNIE/internal/readaloud"
+	"github.com/Sonty15/SONNIE/internal/tts"
 	"github.com/Sonty15/SONNIE/internal/usage"
 )
 
@@ -60,6 +61,50 @@ func TestTTS_DescriptionsFitDiscordLimit(t *testing.T) {
 	check("tts", c.Definition.Description)
 	for _, o := range c.Definition.Options {
 		check(o.Name, o.Description)
+		for _, sub := range o.Options {
+			check(o.Name+"."+sub.Name, sub.Description)
+		}
+	}
+}
+
+type poolController struct {
+	fakeTTSController
+	pool []string
+}
+
+func (p *poolController) VoicePool() []string { return p.pool }
+
+func TestTTS_JoinVoiceOptionChoices(t *testing.T) {
+	c, ok := Find("tts")
+	if !ok {
+		t.Fatal("tts command not found")
+	}
+	joinOpt := c.Definition.Options[0]
+	if joinOpt.Name != "join" || len(joinOpt.Options) != 1 {
+		t.Fatalf("expected 1 option on /tts join, got %+v", joinOpt.Options)
+	}
+	voiceOpt := joinOpt.Options[0]
+	if voiceOpt.Name != "voice" || voiceOpt.Type != discordgo.ApplicationCommandOptionString || voiceOpt.Required {
+		t.Fatalf("unexpected voice option: %+v", voiceOpt)
+	}
+	if len(voiceOpt.Choices) != len(tts.DefaultVoicePool) {
+		t.Fatalf("expected %d default choices, got %d", len(tts.DefaultVoicePool), len(voiceOpt.Choices))
+	}
+	for i, ch := range voiceOpt.Choices {
+		if ch.Name != tts.DefaultVoicePool[i] || ch.Value != tts.DefaultVoicePool[i] {
+			t.Fatalf("choice %d = %+v, want %q", i, ch, tts.DefaultVoicePool[i])
+		}
+	}
+
+	// Custom pool with > 25 voices is capped at Discord's 25-choice limit.
+	var many []string
+	for i := 0; i < 30; i++ {
+		many = append(many, fmt.Sprintf("Voice%02d", i))
+	}
+	SetTTS(&poolController{pool: many})
+	t.Cleanup(func() { SetTTS(nil) })
+	if len(voiceOpt.Choices) != 25 || voiceOpt.Choices[0].Value != "Voice00" || voiceOpt.Choices[24].Value != "Voice24" {
+		t.Fatalf("expected 25 capped choices, got %d", len(voiceOpt.Choices))
 	}
 }
 
@@ -71,20 +116,22 @@ func TestTTSJoinReply(t *testing.T) {
 		want []string
 		not  []string
 	}{
-		{"started", &fakeTTSController{joinRes: readaloud.JoinResult{Started: true, Participants: 1, CanManage: true}},
-			[]string{"เข้าร่วมแล้ว", "<#t>", "อ่านแล้วลบ"}, []string{"ไม่มีสิทธิ์", "<#v>"}},
-		{"added", &fakeTTSController{joinRes: readaloud.JoinResult{Participants: 3, CanManage: true}},
-			[]string{"เข้าร่วมแล้ว", "<#t>", "อ่านแล้วลบ"}, []string{"เริ่มอ่าน"}},
-		{"already in", &fakeTTSController{joinRes: readaloud.JoinResult{AlreadyIn: true, Participants: 2, CanManage: true}},
-			[]string{"อยู่ในการอ่านนี้แล้ว", "<#t>"}, []string{"ลบข้อความ"}},
-		{"no manage messages", &fakeTTSController{joinRes: readaloud.JoinResult{Started: true, Participants: 1}},
-			[]string{"ไม่มีสิทธิ์ลบข้อความ"}, []string{"อ่านแล้วลบ"}},
+		{"started", &fakeTTSController{joinRes: readaloud.JoinResult{Started: true, Voice: "Puck", Participants: 1, CanManage: true}},
+			[]string{"✅ เข้าร่วมแล้ว", "<#t>", "อ่านแล้วลบ", "เสียง Puck"}, []string{"ไม่มีสิทธิ์", "<#v>"}},
+		{"added", &fakeTTSController{joinRes: readaloud.JoinResult{Voice: "Orus", Participants: 3, CanManage: true}},
+			[]string{"✅ เข้าร่วมแล้ว", "<#t>", "อ่านแล้วลบ", "เสียง Orus"}, []string{"เริ่มอ่าน"}},
+		{"already in", &fakeTTSController{joinRes: readaloud.JoinResult{AlreadyIn: true, Voice: "Puck", Participants: 2, CanManage: true}},
+			[]string{"อยู่ในการอ่านนี้แล้ว", "<#t>", "เสียง Puck"}, []string{"ลบข้อความ"}},
+		{"voice changed", &fakeTTSController{joinRes: readaloud.JoinResult{VoiceChanged: true, Voice: "Fenrir", Participants: 2, CanManage: true}},
+			[]string{"เปลี่ยนเสียงแล้ว", "<#t>", "เสียง Fenrir"}, []string{"ไม่มีสิทธิ์"}},
+		{"no manage messages", &fakeTTSController{joinRes: readaloud.JoinResult{Started: true, Voice: "Charon", Participants: 1}},
+			[]string{"ไม่มีสิทธิ์ลบข้อความ", "เสียง Charon"}, []string{"อ่านแล้วลบ"}},
 		{"busy elsewhere", &fakeTTSController{joinErr: &readaloud.BusyError{VoiceChannelID: "v9"}},
 			[]string{"<#v9>", "ยังมีคนอยู่"}, nil},
-		{"moved", &fakeTTSController{joinRes: readaloud.JoinResult{Moved: true, PreviousChannelID: "t0", Participants: 2, CanManage: true}},
-			[]string{"ย้ายแล้ว", "<#t>", "<#t0>"}, []string{"เข้าร่วมแล้ว"}},
-		{"moved without manage", &fakeTTSController{joinRes: readaloud.JoinResult{Moved: true, PreviousChannelID: "t0", Participants: 2}},
-			[]string{"ย้ายแล้ว", "<#t>", "ไม่มีสิทธิ์ลบข้อความ"}, nil},
+		{"moved", &fakeTTSController{joinRes: readaloud.JoinResult{Moved: true, PreviousChannelID: "t0", Voice: "Puck", Participants: 2, CanManage: true}},
+			[]string{"ย้ายแล้ว", "<#t>", "<#t0>", "เสียง Puck"}, []string{"เข้าร่วมแล้ว"}},
+		{"moved without manage", &fakeTTSController{joinRes: readaloud.JoinResult{Moved: true, PreviousChannelID: "t0", Voice: "Puck", Participants: 2}},
+			[]string{"ย้ายแล้ว", "<#t>", "ไม่มีสิทธิ์ลบข้อความ", "เสียง Puck"}, nil},
 		{"session message failed", &fakeTTSController{joinErr: fmt.Errorf("%w: boom", readaloud.ErrSessionMessage)},
 			[]string{"Send Messages", "Embed Links"}, nil},
 		{"voice join failed", &fakeTTSController{joinErr: errors.New("boom")},

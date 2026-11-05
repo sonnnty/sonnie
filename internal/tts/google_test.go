@@ -90,6 +90,8 @@ func TestGoogle_VoiceMappingAndOverride(t *testing.T) {
 		{"default thai", "th", "", "th-TH", DefaultVoiceTH},
 		{"default english", "en", "", "en-US", DefaultVoiceEN},
 		{"thai chirp3 override", "th", "th-TH-Chirp3-HD-Achird", "th-TH", "th-TH-Chirp3-HD-Achird"},
+		{"bare speaker maps to thai chirp3", "th", "Puck", "th-TH", "th-TH-Chirp3-HD-Puck"},
+		{"bare speaker maps to english chirp3", "en", "Orus", "en-US", "en-US-Chirp3-HD-Orus"},
 		{"english voice override with th lang", "th", "en-US-Neural2-D", "en-US", "en-US-Neural2-D"},
 		{"other bcp47 lang without default voice", "fr-FR", "", "fr-FR", ""},
 	}
@@ -285,4 +287,50 @@ func TestGoogle_ClientWithoutAPIKey(t *testing.T) {
 	if _, err := (&Google{Endpoint: srv.URL}).Synthesize(context.Background(), "x", "th"); err == nil {
 		t.Fatal("want an error with neither API key nor client")
 	}
+}
+
+func TestGoogle_PerMessageVoiceOverridesDefaultAndFallsBack(t *testing.T) {
+	t.Run("gemini model", func(t *testing.T) {
+		srv, body := captureBody(t)
+		g := &Google{
+			APIKey: "k", Endpoint: srv.URL, Client: srv.Client(),
+			Model: "gemini-2.5-flash-tts", Voice: "Charon",
+		}
+		ctx := WithVoice(context.Background(), "Puck")
+		if _, err := g.Synthesize(ctx, "สวัสดี", "th"); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(*body, `"name":"Puck"`) {
+			t.Fatalf("expected per-message voice Puck, got %s", *body)
+		}
+		// Without WithVoice it falls back to g.Voice (Charon).
+		if _, err := g.Synthesize(context.Background(), "สวัสดี", "th"); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(*body, `"name":"Charon"`) {
+			t.Fatalf("expected fallback voice Charon, got %s", *body)
+		}
+	})
+
+	t.Run("classic chirp3 mapping", func(t *testing.T) {
+		srv, body := captureBody(t)
+		g := &Google{
+			APIKey: "k", Endpoint: srv.URL, Client: srv.Client(),
+			Voice: "th-TH-Chirp3-HD-Charon",
+		}
+		ctx := WithVoice(context.Background(), "Fenrir")
+		if _, err := g.Synthesize(ctx, "สวัสดี", "th"); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(*body, `"name":"th-TH-Chirp3-HD-Fenrir"`) {
+			t.Fatalf("expected mapped Chirp3-HD voice, got %s", *body)
+		}
+		// Without WithVoice it falls back to g.Voice.
+		if _, err := g.Synthesize(context.Background(), "สวัสดี", "th"); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(*body, `"name":"th-TH-Chirp3-HD-Charon"`) {
+			t.Fatalf("expected fallback voice, got %s", *body)
+		}
+	})
 }

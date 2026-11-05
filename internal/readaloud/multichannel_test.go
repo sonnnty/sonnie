@@ -78,7 +78,7 @@ func TestMultiChannel_JoinFromTwoChannelsPostsACardInEach(t *testing.T) {
 	if e.botMessages("t1") != 1 || e.botMessages("t2") != 1 {
 		t.Fatalf("cards: t1=%d t2=%d, want one each", e.botMessages("t1"), e.botMessages("t2"))
 	}
-	want := "\n👥 <@u1> · <#t1>\n<@u2> · <#t2>"
+	want := "\n👥 <@u1> 🎙️Achird · <#t1>\n<@u2> 🎙️Algenib · <#t2>"
 	for _, ch := range []string{"t1", "t2"} {
 		if got := e.cardText(ch); !strings.HasSuffix(got, want) {
 			t.Errorf("card in %s: %q, want it to end with %q", ch, got, want)
@@ -101,7 +101,7 @@ func TestMultiChannel_JoinFromTwoChannelsPostsACardInEach(t *testing.T) {
 	if e.botMessages("t2") != 1 || e.msgr.editCount() != 3 {
 		t.Fatalf("cards in t2: %d, edits %d", e.botMessages("t2"), e.msgr.editCount())
 	}
-	if got := e.cardText("t1"); !strings.HasSuffix(got, "\n👥 <@u1> · <#t1>\n<@u2> <@u3> · <#t2>") {
+	if got := e.cardText("t1"); !strings.HasSuffix(got, "\n👥 <@u1> 🎙️Achird · <#t1>\n<@u2> 🎙️Algenib, <@u3> 🎙️Algieba · <#t2>") {
 		t.Fatalf("card %q", got)
 	}
 }
@@ -161,7 +161,7 @@ func TestMultiChannel_MovingChangesTheReadChannel(t *testing.T) {
 		t.Fatal("u2 stopped being read")
 	}
 	for _, ch := range []string{"t1", "t3"} {
-		if got := e.cardText(ch); !strings.HasSuffix(got, "\n👥 <@u2> · <#t1>\n<@u1> · <#t3>") {
+		if got := e.cardText(ch); !strings.HasSuffix(got, "\n👥 <@u2> 🎙️Algenib · <#t1>\n<@u1> 🎙️Achird · <#t3>") {
 			t.Errorf("card in %s: %q", ch, got)
 		}
 	}
@@ -172,7 +172,7 @@ func TestMultiChannel_MovingChangesTheReadChannel(t *testing.T) {
 		t.Fatalf("move back: %+v, cards t1=%d t3=%d", res, e.botMessages("t1"), e.botMessages("t3"))
 	}
 	// The card of a channel nobody is read in any more stays and says so by omission.
-	if got := e.cardText("t3"); !strings.HasSuffix(got, "\n👥 <@u1> <@u2> · <#t1>") {
+	if got := e.cardText("t3"); !strings.HasSuffix(got, "\n👥 <@u1> 🎙️Achird, <@u2> 🎙️Algenib · <#t1>") {
 		t.Fatalf("card %q", got)
 	}
 	if res := e.joinAt("u1", "t1"); !res.AlreadyIn {
@@ -221,7 +221,7 @@ func TestMultiChannel_LeaveEditsEveryCard(t *testing.T) {
 		t.Fatalf("%d edits, want one per card", e.msgr.editCount()-before)
 	}
 	for _, ch := range []string{"t1", "t2"} {
-		if got := e.cardText(ch); !strings.HasSuffix(got, "\n👥 <@u1> · <#t1>") || strings.Contains(got, "u2") {
+		if got := e.cardText(ch); !strings.HasSuffix(got, "\n👥 <@u1> 🎙️Achird · <#t1>") || strings.Contains(got, "u2") {
 			t.Errorf("card in %s: %q", ch, got)
 		}
 		mk := e.liveMarker(e.cardIn(ch))

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"reflect"
 	"testing"
 	"time"
 )
@@ -41,7 +42,7 @@ func TestLoad_TTSDefaults(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	want := TTSConfig{Enabled: false, Lang: "th", MaxChars: 200, QueueSize: 20, SpeakAuthor: true, DeleteAfter: 8 * time.Second, MonthlyCharLimit: 1000000, MonthlyBudgetTHB: 300, USDToTHB: 33}
-	if cfg.TTS != want {
+	if !reflect.DeepEqual(cfg.TTS, want) {
 		t.Fatalf("expected %+v, got %+v", want, cfg.TTS)
 	}
 }
@@ -53,6 +54,7 @@ func TestLoad_TTSOverrides(t *testing.T) {
 		"GOOGLE_TTS_API_KEY": "gkey",
 		"TTS_LANG":           "en",
 		"TTS_VOICE":          "en-US-Chirp3-HD-Charon",
+		"TTS_VOICE_POOL":     " Puck , Orus , Puck , Charon ",
 		"TTS_MAX_CHARS":      "80",
 		"TTS_QUEUE_SIZE":     "5",
 		"TTS_SPEAK_AUTHOR":   "false",
@@ -69,6 +71,7 @@ func TestLoad_TTSOverrides(t *testing.T) {
 		GoogleAPIKey: "gkey",
 		Lang:         "en",
 		Voice:        "en-US-Chirp3-HD-Charon",
+		VoicePool:    []string{"Puck", "Orus", "Charon"},
 		MaxChars:     80,
 		QueueSize:    5,
 		SpeakAuthor:  false,
@@ -79,7 +82,7 @@ func TestLoad_TTSOverrides(t *testing.T) {
 		USDToTHB:         33,
 		AlertChannelID:   "123456789012345678",
 	}
-	if cfg.TTS != want {
+	if !reflect.DeepEqual(cfg.TTS, want) {
 		t.Fatalf("expected %+v, got %+v", want, cfg.TTS)
 	}
 }
@@ -100,6 +103,7 @@ func TestLoad_TTSInvalidValues(t *testing.T) {
 		{"TTS_MONTHLY_CHAR_LIMIT", "-1"},
 		{"TTS_MONTHLY_CHAR_LIMIT", "1m"},
 		{"TTS_ALERT_CHANNEL_ID", "#alerts"},
+		{"TTS_VOICE_POOL", " , "},
 	}
 	for _, tt := range tests {
 		t.Run(tt.key+"="+tt.value, func(t *testing.T) {

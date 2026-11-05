@@ -5,6 +5,8 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"maps"
+	"math/rand/v2"
 	"slices"
 	"strconv"
 	"strings"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 
+	"github.com/Sonty15/SONNIE/internal/tts"
 	"github.com/Sonty15/SONNIE/internal/usage"
 )
 
@@ -349,6 +352,13 @@ type sessionView struct {
 	// Binds are the clean-up records: one per (user, channel) the user was
 	// ever read in, with the time they first joined there.
 	Binds []MarkerBind
+	// Voices maps every user who has joined this session (including those who
+	// later left) to their assigned speaker voice.
+	Voices map[string]string
+	// VoiceRound is the 1-based round number of the pool handout.
+	VoiceRound int
+	// RoundUsed records which voices have been handed out in VoiceRound.
+	RoundUsed map[string]bool
 }
 
 func (v sessionView) clone() sessionView {
@@ -356,7 +366,63 @@ func (v sessionView) clone() sessionView {
 	v.Members = slices.Clone(v.Members)
 	v.Left = slices.Clone(v.Left)
 	v.Binds = slices.Clone(v.Binds)
+	v.Voices = maps.Clone(v.Voices)
+	v.RoundUsed = maps.Clone(v.RoundUsed)
 	return v
+}
+
+// voiceOf returns the speaker voice assigned to user in this session, if any.
+func (v sessionView) voiceOf(user string) string {
+	return v.Voices[user]
+}
+
+// assignVoice ensures user has a voice for this session, picking from pool when
+// they have none yet or when picked is non-empty and differs from their current
+// voice. It returns the updated view, the user's voice, and whether a new
+// assignment was made.
+func (v sessionView) assignVoice(user, picked string, pool []string, randIntn func(int) int) (next sessionView, voice string, assigned bool) {
+	v = v.clone()
+	picked = strings.TrimSpace(picked)
+	current := v.Voices[user]
+	if current != "" && (picked == "" || picked == current) {
+		return v, current, false
+	}
+	if len(pool) == 0 {
+		pool = tts.DefaultVoicePool
+	}
+	if randIntn == nil {
+		randIntn = rand.IntN
+	}
+	unused := unusedVoices(pool, v.RoundUsed)
+	if v.VoiceRound == 0 || len(unused) == 0 {
+		v.VoiceRound++
+		v.RoundUsed = make(map[string]bool)
+		unused = pool
+	}
+	if v.RoundUsed == nil {
+		v.RoundUsed = make(map[string]bool)
+	}
+	if picked != "" {
+		voice = picked
+	} else {
+		voice = unused[randIntn(len(unused))]
+	}
+	v.RoundUsed[voice] = true
+	if v.Voices == nil {
+		v.Voices = make(map[string]string)
+	}
+	v.Voices[user] = voice
+	return v, voice, true
+}
+
+func unusedVoices(pool []string, used map[string]bool) []string {
+	var out []string
+	for _, voice := range pool {
+		if !used[voice] {
+			out = append(out, voice)
+		}
+	}
+	return out
 }
 
 // channelOf is the text channel user is read in, if they are a participant.
@@ -487,7 +553,7 @@ func mentions(ids []string, sep string) string {
 }
 
 // participantLines lists the participants grouped by the channel they are read
-// in, one compact line per channel, e.g. "<@a> <@b> · <#general>".
+// in, one compact line per channel, e.g. "<@a> 🎙️Puck, <@b> 🎙️Orus · <#general>".
 func participantLines(v sessionView) string {
 	if len(v.Members) == 0 {
 		return "-"
@@ -495,21 +561,37 @@ func participantLines(v sessionView) string {
 	var lines []string
 	shown := 0
 	for _, c := range v.Channels {
-		var ids []string
+		var parts []string
+		hasVoice := false
 		for _, m := range v.Members {
 			if m.Channel == c.ID && shown < maxListedMentions {
-				ids = append(ids, m.User)
+				voice := v.Voices[m.User]
+				if voice != "" {
+					hasVoice = true
+				}
+				parts = append(parts, formatParticipant(m.User, voice))
 				shown++
 			}
 		}
-		if len(ids) > 0 {
-			lines = append(lines, mentions(ids, " ")+" · <#"+c.ID+">")
+		if len(parts) > 0 {
+			sep := " "
+			if hasVoice {
+				sep = ", "
+			}
+			lines = append(lines, strings.Join(parts, sep)+" · <#"+c.ID+">")
 		}
 	}
 	if extra := len(v.Members) - shown; extra > 0 {
 		lines = append(lines, fmt.Sprintf("และอีก %d คน", extra))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func formatParticipant(user, voice string) string {
+	if voice == "" {
+		return "<@" + user + ">"
+	}
+	return "<@" + user + "> 🎙️" + voice
 }
 
 // sessionEmbed builds the live card shown in channelID, kept short: who takes

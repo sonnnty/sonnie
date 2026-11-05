@@ -64,6 +64,9 @@ type TTSConfig struct {
 	// Voice, if non-empty, overrides the default voice name selected from
 	// Lang (e.g. "th-TH-Chirp3-HD-Achird").
 	Voice string
+	// VoicePool (TTS_VOICE_POOL), if non-empty, overrides tts.DefaultVoicePool
+	// for per-participant session voices.
+	VoicePool []string
 	// Model, if non-empty (TTS_MODEL), selects a Gemini-TTS model such as
 	// "gemini-2.5-flash-tts". Empty keeps the classic voices (Chirp/Neural2).
 	Model string
@@ -182,6 +185,9 @@ func loadTTS(getenv func(string) string) (TTSConfig, error) {
 	cfg.Prompt = strings.TrimSpace(getenv("TTS_PROMPT"))
 
 	var err error
+	if cfg.VoicePool, err = parseVoicePool(getenv("TTS_VOICE_POOL")); err != nil {
+		return TTSConfig{}, err
+	}
 	if cfg.Enabled, err = parseBool(getenv, "TTS_ENABLED", false); err != nil {
 		return TTSConfig{}, err
 	}
@@ -215,6 +221,26 @@ func loadTTS(getenv func(string) string) (TTSConfig, error) {
 	}
 
 	return cfg, nil
+}
+
+func parseVoicePool(raw string) ([]string, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	var pool []string
+	seen := make(map[string]bool)
+	for _, part := range strings.Split(raw, ",") {
+		v := strings.TrimSpace(part)
+		if v == "" || seen[v] {
+			continue
+		}
+		seen[v] = true
+		pool = append(pool, v)
+	}
+	if len(pool) == 0 {
+		return nil, fmt.Errorf("TTS_VOICE_POOL: %q must list at least one voice", raw)
+	}
+	return pool, nil
 }
 
 func isSnowflake(s string) bool {

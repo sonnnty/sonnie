@@ -26,6 +26,27 @@ func TestFake_RecordsRequestsAndEchoesText(t *testing.T) {
 	if len(got) != 1 || got[0] != (Request{Text: "สวัสดี", Lang: "th"}) {
 		t.Fatalf("unexpected requests: %+v", got)
 	}
+
+	if _, err := f.Synthesize(WithVoice(context.Background(), "Puck"), "ครับ", "th"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got = f.Requests()
+	if len(got) != 2 || got[1] != (Request{Text: "ครับ", Lang: "th", Voice: "Puck"}) {
+		t.Fatalf("unexpected requests with voice: %+v", got)
+	}
+}
+
+func TestDefaultVoicePool(t *testing.T) {
+	if len(DefaultVoicePool) != 16 {
+		t.Fatalf("expected 16 voices in DefaultVoicePool, got %d: %v", len(DefaultVoicePool), DefaultVoicePool)
+	}
+	seen := make(map[string]bool, len(DefaultVoicePool))
+	for _, v := range DefaultVoicePool {
+		if v == "" || seen[v] {
+			t.Fatalf("invalid or duplicate voice %q in DefaultVoicePool", v)
+		}
+		seen[v] = true
+	}
 }
 
 func TestFake_RespectsCancelledContext(t *testing.T) {

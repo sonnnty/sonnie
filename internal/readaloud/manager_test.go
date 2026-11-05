@@ -139,6 +139,7 @@ func newEnv(t *testing.T) *env {
 		MaxChars:    200,
 		QueueSize:   10,
 		SpeakAuthor: true,
+		RandIntn:    func(int) int { return 0 },
 		Now:         clock.now,
 	})
 	t.Cleanup(m.Close)
@@ -349,7 +350,7 @@ func TestManager_LaterJoinEditsTheSameMessage(t *testing.T) {
 		t.Fatalf("%d edits, want 1", e.msgr.editCount())
 	}
 	emb := e.msgr.embed(msgID)
-	if !strings.Contains(emb.Description, "👥 <@u1> <@u2> · <#t1>") {
+	if !strings.Contains(emb.Description, "👥 <@u1> 🎙️Achird, <@u2> 🎙️Algenib · <#t1>") {
 		t.Fatalf("description %q", emb.Description)
 	}
 	if mk := e.liveMarker(msgID); len(mk.Participants) != 2 {

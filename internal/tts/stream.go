@@ -90,7 +90,10 @@ func ReadAll(stream AudioStream) (Audio, error) {
 // stream failed before any audio and the unary call was used; its times
 // include the failed attempt). first_audio is from the request until the
 // first audio byte; total until the last.
+//
+// The timing is also kept for the dashboard (RecentTimings).
 func logTiming(path string, firstAudio, total time.Duration, bytes int) {
+	recordTiming(Timing{At: time.Now(), Path: path, FirstAudio: firstAudio, Total: total, Bytes: bytes})
 	log.Printf("tts: timing path=%s first_audio=%v total=%v bytes=%d",
 		path, firstAudio.Round(time.Millisecond), total.Round(time.Millisecond), bytes)
 }

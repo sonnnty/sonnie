@@ -222,3 +222,30 @@ func getJSON(ctx context.Context, client *http.Client, url string, header http.H
 	}
 	return json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(v)
 }
+
+// ProviderStatus is one provider of a Chain, for the dashboard.
+type ProviderStatus struct {
+	Name string
+	// PausedUntil is when a paused provider (Brave, out of monthly credit)
+	// is tried again; zero when it is in use.
+	PausedUntil time.Time
+}
+
+// pauser is implemented by providers that can pause themselves (Brave).
+type pauser interface {
+	PausedUntil() (time.Time, bool)
+}
+
+// Status lists the providers in the order they are tried, with any pause.
+func (c Chain) Status() []ProviderStatus {
+	out := make([]ProviderStatus, len(c))
+	for i, p := range c {
+		out[i].Name = p.Name()
+		if pp, ok := p.(pauser); ok {
+			if until, paused := pp.PausedUntil(); paused {
+				out[i].PausedUntil = until
+			}
+		}
+	}
+	return out
+}

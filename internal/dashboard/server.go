@@ -213,6 +213,8 @@ type page struct {
 	Link    string
 	LinkTo  string
 	Panels  []Panel
+	// BodyClass styles the page, e.g. "page-dashboard" for the full-window grid.
+	BodyClass string
 }
 
 func (s *Server) render(w http.ResponseWriter, status int, name string, p page) {
@@ -267,7 +269,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	case !allowed:
 		s.forbidden(w, sess.Name)
 	default:
-		s.render(w, http.StatusOK, "dashboard", page{Title: "แดชบอร์ด", User: sess.Name, Panels: s.cfg.Panels})
+		s.render(w, http.StatusOK, "dashboard", page{Title: "แดชบอร์ด", User: sess.Name, Panels: s.cfg.Panels, BodyClass: "page-dashboard"})
 	}
 }
 

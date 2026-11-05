@@ -89,3 +89,26 @@ th { color: var(--muted); font-weight: 600; border-top: 0; }
 }
 .log .hit { background: rgba(240, 177, 61, .35); }
 pre.raw { font: 12px/1.4 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
+
+/* Wide screens: the whole dashboard fits the window, no page scroll.
+   Four columns; rows share the height, so new panels add a row and still fit.
+   A card that holds more than its cell scrolls inside itself (log, long lists). */
+@media (min-width: 1100px) and (min-height: 620px) {
+  body.page-dashboard { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+  body.page-dashboard main {
+    flex: 1; min-height: 0; width: 100%; max-width: none;
+    display: flex; flex-direction: column; padding: 10px 14px;
+  }
+  body.page-dashboard .status-line { margin: 0 4px 8px; flex: none; }
+  body.page-dashboard .panels {
+    flex: 1; min-height: 0; gap: 10px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-auto-rows: minmax(0, 1fr);
+  }
+  body.page-dashboard .panel { display: flex; flex-direction: column; min-height: 0; overflow: hidden; padding: 12px 14px; }
+  body.page-dashboard .panel h2 { flex: none; }
+  body.page-dashboard .panel-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
+  body.page-dashboard .panel.wide { grid-column: span 3; }
+  body.page-dashboard .log-tools { flex: none; }
+  body.page-dashboard .log { flex: 1; min-height: 0; max-height: none; }
+}

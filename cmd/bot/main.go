@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -10,9 +11,15 @@ import (
 
 	"github.com/Sonty15/SONNIE/internal/bot"
 	"github.com/Sonty15/SONNIE/internal/config"
+	"github.com/Sonty15/SONNIE/internal/logring"
 )
 
 func main() {
+	// Keep the recent log lines for the dashboard. The process output is
+	// unchanged: the standard logger still writes to stderr as before.
+	logs := logring.New(logring.DefaultSize)
+	log.SetOutput(io.MultiWriter(os.Stderr, logs))
+
 	_ = godotenv.Load()
 
 	cfg, err := config.LoadEnv(os.LookupEnv)

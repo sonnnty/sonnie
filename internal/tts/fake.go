@@ -7,8 +7,9 @@ import (
 
 // Request is one call recorded by Fake.
 type Request struct {
-	Text string
-	Lang string
+	Text  string
+	Lang  string
+	Voice string
 }
 
 // Fake is an in-memory Synthesizer for tests. It records every request and
@@ -26,7 +27,7 @@ func (f *Fake) Synthesize(ctx context.Context, text, lang string) (Audio, error)
 		return Audio{}, err
 	}
 	f.mu.Lock()
-	f.requests = append(f.requests, Request{Text: text, Lang: lang})
+	f.requests = append(f.requests, Request{Text: text, Lang: lang, Voice: VoiceFromContext(ctx)})
 	f.mu.Unlock()
 	if f.Err != nil {
 		return Audio{}, f.Err

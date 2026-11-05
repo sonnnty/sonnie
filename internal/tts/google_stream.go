@@ -88,7 +88,7 @@ func (g *GoogleStream) start(ctx context.Context, text, lang string) (texttospee
 	if err != nil {
 		return nil, nil, fmt.Errorf("tts: google: stream: open: %w", err)
 	}
-	cfg, input := g.streamRequests(text, lang)
+	cfg, input := g.streamRequestsWithVoice(text, lang, VoiceFromContext(ctx))
 	if err := call.Send(cfg); err != nil {
 		return nil, nil, fmt.Errorf("tts: google: stream: send config: %w", recvErr(call, err))
 	}
@@ -130,7 +130,11 @@ func recvErr(call texttospeechpb.TextToSpeech_StreamingSynthesizeClient, err err
 // settings as the REST request: first the config, then the text (and, for
 // Gemini, the style prompt).
 func (g *GoogleStream) streamRequests(text, lang string) (cfg, input *texttospeechpb.StreamingSynthesizeRequest) {
-	r := g.REST.buildRequest(text, lang)
+	return g.streamRequestsWithVoice(text, lang, "")
+}
+
+func (g *GoogleStream) streamRequestsWithVoice(text, lang, voice string) (cfg, input *texttospeechpb.StreamingSynthesizeRequest) {
+	r := g.REST.buildRequestWithVoice(text, lang, voice)
 	cfg = &texttospeechpb.StreamingSynthesizeRequest{
 		StreamingRequest: &texttospeechpb.StreamingSynthesizeRequest_StreamingConfig{
 			StreamingConfig: &texttospeechpb.StreamingSynthesizeConfig{

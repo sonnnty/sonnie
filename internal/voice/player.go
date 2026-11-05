@@ -62,7 +62,7 @@ func NewPlayer(cfg PlayerConfig) *Player {
 // Enqueue adds text to the queue and reports whether the oldest waiting
 // item was dropped to make room.
 func (p *Player) Enqueue(text string) (dropped bool) {
-	return p.EnqueueWith(text, nil)
+	return p.EnqueueVoice(text, "", nil)
 }
 
 // EnqueueWith is Enqueue with a hook that reports what became of the item.
@@ -72,7 +72,13 @@ func (p *Player) Enqueue(text string) (dropped bool) {
 // on the player's goroutine (or the caller's, for a drop), so it must not
 // block. The player knows nothing about where the text came from.
 func (p *Player) EnqueueWith(text string, done func(spoken bool)) (dropped bool) {
-	old, dropped := p.queue.Push(item{text: text, done: done})
+	return p.EnqueueVoice(text, "", done)
+}
+
+// EnqueueVoice is EnqueueWith with a speaker voice attached to the queued item.
+// An empty voice uses the synthesizer's default voice.
+func (p *Player) EnqueueVoice(text, voice string, done func(spoken bool)) (dropped bool) {
+	old, dropped := p.queue.Push(item{text: text, voice: voice, done: done})
 	if dropped && old.done != nil {
 		old.done(false)
 	}
@@ -104,7 +110,7 @@ func (p *Player) run(ctx context.Context) {
 			if !ok {
 				break
 			}
-			err := p.speak(ctx, it.text)
+			err := p.speak(ctx, it)
 			if err != nil && ctx.Err() != nil {
 				return
 			}
@@ -118,11 +124,12 @@ func (p *Player) run(ctx context.Context) {
 	}
 }
 
-func (p *Player) speak(ctx context.Context, text string) error {
+func (p *Player) speak(ctx context.Context, it item) error {
+	ctx = tts.WithVoice(ctx, it.voice)
 	if enc, ok := p.cfg.Encoder.(StreamEncoder); ok {
-		return p.speakStream(ctx, enc, text)
+		return p.speakStream(ctx, enc, it.text)
 	}
-	return p.speakWhole(ctx, text)
+	return p.speakWhole(ctx, it.text)
 }
 
 // speakWhole synthesizes and encodes the whole utterance, then plays it.

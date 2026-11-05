@@ -108,7 +108,7 @@ func (g *Google) synthesize(ctx context.Context, text, lang string) (Audio, erro
 		return Audio{}, errors.New("tts: google: neither an API key nor an authenticated client is set")
 	}
 
-	payload, err := json.Marshal(g.buildRequest(text, lang))
+	payload, err := json.Marshal(g.buildRequestWithVoice(text, lang, VoiceFromContext(ctx)))
 	if err != nil {
 		return Audio{}, fmt.Errorf("tts: google: marshal request: %w", err)
 	}
@@ -157,6 +157,10 @@ func IsGeminiModel(model string) bool {
 }
 
 func (g *Google) buildRequest(text, lang string) googleRequest {
+	return g.buildRequestWithVoice(text, lang, "")
+}
+
+func (g *Google) buildRequestWithVoice(text, lang, voice string) googleRequest {
 	req := googleRequest{
 		Input: googleInput{Text: text},
 		AudioConfig: googleAudioConfig{
@@ -164,8 +168,12 @@ func (g *Google) buildRequest(text, lang string) googleRequest {
 			SampleRateHertz: googleSampleRateHertz,
 		},
 	}
+	chosen := strings.TrimSpace(voice)
+	if chosen == "" {
+		chosen = strings.TrimSpace(g.Voice)
+	}
 	if IsGeminiModel(g.Model) {
-		speaker := strings.TrimSpace(g.Voice)
+		speaker := chosen
 		if speaker == "" {
 			speaker = DefaultGeminiSpeaker
 		}
@@ -177,7 +185,7 @@ func (g *Google) buildRequest(text, lang string) googleRequest {
 		}
 		return req
 	}
-	langCode, voiceName := resolveVoice(lang, g.Voice)
+	langCode, voiceName := resolveVoice(lang, chosen)
 	req.Voice = googleVoice{LanguageCode: langCode, Name: voiceName}
 	return req
 }
@@ -189,7 +197,8 @@ func languageCode(lang string) string {
 }
 
 // resolveVoice maps a short or BCP 47 language code to a Google languageCode
-// and default voice name, applying voiceOverride when set.
+// and default voice name, applying voiceOverride when set. Bare speaker names
+// (such as "Puck") map to "<langCode>-Chirp3-HD-<Name>".
 func resolveVoice(lang, voiceOverride string) (langCode, voiceName string) {
 	switch strings.ToLower(strings.TrimSpace(lang)) {
 	case "", "th", "th-th":
@@ -205,9 +214,13 @@ func resolveVoice(lang, voiceOverride string) (langCode, voiceName string) {
 	}
 
 	if v := strings.TrimSpace(voiceOverride); v != "" {
-		voiceName = v
 		if prefix := voiceLangPrefix(v); prefix != "" {
 			langCode = prefix
+			voiceName = v
+		} else if !strings.Contains(v, "-") && langCode != "" {
+			voiceName = langCode + "-Chirp3-HD-" + v
+		} else {
+			voiceName = v
 		}
 	}
 	return langCode, voiceName

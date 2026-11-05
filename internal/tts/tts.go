@@ -46,3 +46,43 @@ type Unimplemented struct{}
 func (Unimplemented) Synthesize(context.Context, string, string) (Audio, error) {
 	return Audio{}, ErrNotImplemented
 }
+
+// DefaultVoicePool lists the Gemini-TTS male voices handed out to session
+// participants when TTS_VOICE_POOL is not set.
+var DefaultVoicePool = []string{
+	"Achird",
+	"Algenib",
+	"Algieba",
+	"Alnilam",
+	"Charon",
+	"Enceladus",
+	"Fenrir",
+	"Iapetus",
+	"Orus",
+	"Puck",
+	"Rasalgethi",
+	"Sadachbia",
+	"Sadaltager",
+	"Schedar",
+	"Umbriel",
+	"Zubenelgenubi",
+}
+
+type voiceContextKey struct{}
+
+// WithVoice attaches a per-utterance speaker voice override to ctx. An empty
+// voice leaves ctx unchanged so synthesizers fall back to their configured
+// default voice.
+func WithVoice(ctx context.Context, voice string) context.Context {
+	if voice == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, voiceContextKey{}, voice)
+}
+
+// VoiceFromContext returns the per-utterance speaker voice attached to ctx by
+// WithVoice, or "" if none was set.
+func VoiceFromContext(ctx context.Context) string {
+	v, _ := ctx.Value(voiceContextKey{}).(string)
+	return v
+}

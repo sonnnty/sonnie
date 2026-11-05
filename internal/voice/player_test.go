@@ -42,6 +42,26 @@ func TestPlayer_SpeaksInOrder(t *testing.T) {
 	}
 }
 
+func TestPlayer_EnqueueVoicePassesVoiceToSynthesizer(t *testing.T) {
+	synth := &tts.Fake{}
+	conn := &FakeConn{Sent: make(chan []byte, 4)}
+	p := NewPlayer(PlayerConfig{Synth: synth, Encoder: FakeEncoder{}, Conn: conn, Lang: "th", QueueSize: 10})
+	defer p.Close()
+
+	p.EnqueueVoice("หนึ่ง", "Puck", nil)
+	p.EnqueueVoice("สอง", "Orus", nil)
+
+	for _, want := range []string{"หนึ่ง", "สอง"} {
+		if got := waitFrame(t, conn.Sent); got != want {
+			t.Fatalf("expected %q, got %q", want, got)
+		}
+	}
+	reqs := synth.Requests()
+	if len(reqs) != 2 || reqs[0].Voice != "Puck" || reqs[1].Voice != "Orus" {
+		t.Fatalf("unexpected requests: %+v", reqs)
+	}
+}
+
 func TestPlayer_ReportsErrorsAndContinues(t *testing.T) {
 	errs := make(chan error, 1)
 	p := NewPlayer(PlayerConfig{

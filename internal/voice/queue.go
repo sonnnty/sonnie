@@ -4,8 +4,9 @@ import "sync"
 
 // item is one queued utterance and the hook to call when it leaves the player.
 type item struct {
-	text string
-	done func(spoken bool)
+	text  string
+	voice string
+	done  func(spoken bool)
 }
 
 // queue is a bounded FIFO of utterances. When full, Push drops the oldest

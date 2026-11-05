@@ -70,8 +70,30 @@ func TestStateGuilds_ManageServerOverREST(t *testing.T) {
 	if ids := g.GuildIDs(); len(ids) != 1 || ids[0] != "g1" {
 		t.Fatalf("guild IDs %v", ids)
 	}
-	if _, found, err := g.Member(context.Background(), "unknown-guild", "mod-user"); found || err != nil {
-		t.Fatalf("unknown guild: %v %v", found, err)
+	if _, found, err := g.Member(context.Background(), "unknown-guild", "mod-user"); found || !errors.Is(err, dashboard.ErrGuildsNotLoaded) {
+		t.Fatalf("guild not in the state yet: %v %v", found, err)
+	}
+}
+
+// After a restart or re-identify the state holds no guilds, or Ready stubs
+// without roles: the answer must be "unknown", never a cached refusal.
+func TestStateGuilds_UnloadedStateIsNotARefusal(t *testing.T) {
+	api := fakeMembers{roles: map[string][]string{"g1/mod-user": {"mod"}}}
+
+	empty := &discordgo.Session{State: discordgo.NewState()}
+	if ok, err := (dashboard.GuildAccess{Guilds: stateGuilds{s: empty, api: api}}).Authorize(context.Background(), "mod-user"); ok || !errors.Is(err, dashboard.ErrGuildsNotLoaded) {
+		t.Fatalf("no guilds yet: %v %v", ok, err)
+	}
+
+	stub := discordgo.NewState()
+	if err := stub.GuildAdd(&discordgo.Guild{ID: "g1", Unavailable: true}); err != nil {
+		t.Fatal(err)
+	}
+	g := stateGuilds{s: &discordgo.Session{State: stub}, api: api}
+	for _, access := range []dashboard.GuildAccess{{Guilds: g}, {Guilds: g, GuildID: "g1", RoleIDs: []string{"mod"}}} {
+		if ok, err := access.Authorize(context.Background(), "mod-user"); ok || !errors.Is(err, dashboard.ErrGuildsNotLoaded) {
+			t.Fatalf("Ready stub: %v %v", ok, err)
+		}
 	}
 }
 

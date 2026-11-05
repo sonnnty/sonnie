@@ -8,6 +8,11 @@ import (
 	"strings"
 )
 
+// ErrGuildsNotLoaded means the bot does not know its guilds yet (just started
+// or reconnecting). It makes the access check indeterminate: the request is
+// answered 503 and nothing is cached, so the page retries.
+var ErrGuildsNotLoaded = errors.New("guild state not loaded yet")
+
 // Authorizer decides whether a Discord user may see the dashboard.
 type Authorizer interface {
 	Authorize(ctx context.Context, userID string) (bool, error)
@@ -91,14 +96,19 @@ func (a GuildAccess) Authorize(ctx context.Context, userID string) (bool, error)
 		return false, nil
 	}
 	var errs []string
+	notLoaded := false
 	guilds := a.Guilds.GuildIDs()
 	if a.GuildID != "" {
 		guilds = []string{a.GuildID}
+	}
+	if len(guilds) == 0 {
+		return false, ErrGuildsNotLoaded
 	}
 	for _, gid := range guilds {
 		m, found, err := a.Guilds.Member(ctx, gid, userID)
 		if err != nil {
 			errs = append(errs, fmt.Sprintf("guild %s: %v", gid, err))
+			notLoaded = notLoaded || errors.Is(err, ErrGuildsNotLoaded)
 			continue
 		}
 		if found && a.grants(m, userID) {
@@ -107,6 +117,9 @@ func (a GuildAccess) Authorize(ctx context.Context, userID string) (bool, error)
 	}
 	if len(errs) > 0 {
 		// One line, so it logs as one entry.
+		if notLoaded {
+			return false, fmt.Errorf("%w (%s)", ErrGuildsNotLoaded, strings.Join(errs, "; "))
+		}
 		return false, errors.New(strings.Join(errs, "; "))
 	}
 	return false, nil

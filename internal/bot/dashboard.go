@@ -288,10 +288,17 @@ func (g stateGuilds) GuildIDs() []string {
 func (g stateGuilds) Member(ctx context.Context, guildID, userID string) (dashboard.GuildMember, bool, error) {
 	guild, err := g.s.State.Guild(guildID)
 	if err != nil {
-		return dashboard.GuildMember{}, false, nil
+		// Not in the state yet (just started or re-identifying): unknown,
+		// not a refusal, so the answer is not cached.
+		return dashboard.GuildMember{}, false, fmt.Errorf("%w: guild %s", dashboard.ErrGuildsNotLoaded, guildID)
 	}
 	gm := dashboard.GuildMember{GuildID: guildID, RolePerms: map[string]int64{}}
 	g.s.State.RLock()
+	if guild.Unavailable || len(guild.Roles) == 0 {
+		// A Ready stub: roles and owner arrive with GUILD_CREATE.
+		g.s.State.RUnlock()
+		return dashboard.GuildMember{}, false, fmt.Errorf("%w: guild %s", dashboard.ErrGuildsNotLoaded, guildID)
+	}
 	gm.OwnerID = guild.OwnerID
 	for _, r := range guild.Roles {
 		gm.RolePerms[r.ID] = r.Permissions

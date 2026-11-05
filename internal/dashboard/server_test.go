@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -533,6 +534,24 @@ func TestAccess_OutageUsesRecentDecision(t *testing.T) {
 	e.clock.advance(time.Hour)
 	if resp, _ := e.get(c, "/api/panels"); resp.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("too old to trust: %d", resp.StatusCode)
+	}
+}
+
+func TestAccess_UnloadedGuildsAreRetriedNotCached(t *testing.T) {
+	e := newEnv(t, nil)
+	c := e.browser()
+	e.login(c, "1")
+	// The bot restarted long ago enough that nothing cached is trusted, and
+	// its guilds are not loaded yet.
+	e.clock.advance(2 * time.Hour)
+	e.guilds.setErr(fmt.Errorf("%w: guild 100", ErrGuildsNotLoaded))
+	if resp, _ := e.get(c, "/api/panels"); resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("while loading: %d, want 503 (the page retries)", resp.StatusCode)
+	}
+	// The guilds arrive: the very next poll gets in, no 10-minute refusal.
+	e.guilds.setErr(nil)
+	if resp, _ := e.get(c, "/api/panels"); resp.StatusCode != http.StatusOK {
+		t.Fatalf("after loading: %d", resp.StatusCode)
 	}
 }
 

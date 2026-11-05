@@ -97,7 +97,7 @@ func TestBotNew_StreamingSynthIsMetered(t *testing.T) {
 	b, err := New(config.Config{DiscordToken: "t", TTS: config.TTSConfig{
 		Enabled: true, GoogleCredentialsFile: fakeServiceAccount(t), Model: "gemini-2.5-flash-tts", Streaming: true,
 		Lang: "th", MaxChars: 200, QueueSize: 20, MonthlyBudgetTHB: 300, USDToTHB: 33,
-	}})
+	}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -27,7 +27,7 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 
-	b, err := bot.New(cfg)
+	b, err := bot.New(cfg, logs)
 	if err != nil {
 		log.Fatalf("bot: %v", err)
 	}

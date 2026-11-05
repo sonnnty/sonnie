@@ -123,6 +123,9 @@ func (b *Bot) handleVoiceStateUpdate(_ *discordgo.Session, v *discordgo.VoiceSta
 	if v.GuildID == "" {
 		return
 	}
+	if v.VoiceState != nil && v.UserID != "" {
+		b.readAloud.HandleUserVoice(v.GuildID, v.UserID, v.ChannelID)
+	}
 	b.readAloud.HandleVoiceStateUpdate(v.GuildID)
 }
 

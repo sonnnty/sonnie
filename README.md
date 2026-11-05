@@ -259,8 +259,9 @@ session.
    on your messages are read there, no longer in the old channel, and the reply
    says so. Running it again in the channel you are already read in changes
    nothing.
-4. `/tts leave` removes you and edits all the cards. When the last participant
-   leaves, the session ends.
+4. `/tts leave` removes you and edits all the cards. Leaving the voice
+   channel (disconnecting or moving to another voice channel) does the same
+   without the command. When the last participant leaves, the session ends.
 5. While the session runs, each participant message is **deleted a few
    seconds after it has been read aloud** (see below), in every channel.
 6. When a session ends (last participant left, nobody but bots left in the

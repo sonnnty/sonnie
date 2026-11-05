@@ -434,6 +434,34 @@ func (m *Manager) Leave(guildID, userID string) (LeaveResult, error) {
 	return LeaveResult{Participants: n}, nil
 }
 
+// HandleUserVoice takes userID out of guildID's session when they leave its
+// voice channel (disconnect or move elsewhere) without running /tts leave, as
+// if they had run it. channelID is the user's voice channel after the update,
+// "" when they disconnected. Their messages stay tracked for the end-of-session
+// clean-up, the same as after /tts leave.
+func (m *Manager) HandleUserVoice(guildID, userID, channelID string) {
+	m.mu.Lock()
+	s := m.sessions[guildID]
+	stays := s == nil || channelID == s.voiceChannelID
+	if !stays {
+		_, member := s.view.channelOf(userID)
+		stays = !member
+	}
+	m.mu.Unlock()
+	if stays {
+		return
+	}
+	res, err := m.Leave(guildID, userID)
+	switch {
+	case errors.Is(err, ErrNotBound), errors.Is(err, ErrNotParticipant):
+		// Ended or left in the meantime.
+	case err != nil:
+		log.Printf("tts: guild %s: auto-leave of %s after leaving voice: %v", guildID, userID, err)
+	default:
+		log.Printf("tts: session auto-leave guild=%s user=%s (left voice) ended=%v", guildID, userID, res.Ended)
+	}
+}
+
 // Bound returns the voice channel of guildID's session, if any.
 func (m *Manager) Bound(guildID string) (voiceChannelID string, ok bool) {
 	m.mu.Lock()

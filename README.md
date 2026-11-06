@@ -1,4 +1,4 @@
-# SONNIE
+# SONNIE 😊
 
 A general-purpose Discord bot written in Go, grown one command at a time. It builds into a static, CGO-free binary on distroless base and runs as a single replica.
 

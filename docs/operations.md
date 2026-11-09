@@ -62,7 +62,7 @@ Without `DISCORD_BOT_TOKEN` the container exits immediately with a config
 error. The dashboard works over plain HTTP on a LAN address (for example a
 Kubernetes NodePort); behind HTTPS set `DASHBOARD_PUBLIC_URL` to the `https`
 address so the session cookie is marked `Secure`. Kubernetes manifests live in
-a separate repository (homelab-ops), not here.
+a separate repository (tapb-server-ops), not here.
 
 ### Releases
 

@@ -61,7 +61,7 @@ The dashboard stays read-only unless the owner asks for actions.
 - Discord-facing text is Thai; code, comments and logs are English.
 - New settings go in `internal/config` with tests, in `.env.example`,
   in `docs/operations.md` and in the README when essential.
-- Kubernetes manifests live in a separate repo (homelab-ops), not here.
+- Kubernetes manifests live in a separate repo (tapb-server-ops), not here.
 - Releases use semantic versions: git tag `vX.Y.Z` on `main`, image
   `rg.tapb.ch/sonnie:X.Y.Z` built with `--build-arg VERSION=X.Y.Z` (shown on
   the dashboard). Bump MINOR for a feature, PATCH for a fix, MAJOR for a
